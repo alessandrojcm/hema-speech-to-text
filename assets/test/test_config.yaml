@@ -1,0 +1,28 @@
+# Test configuration for HEMA Tournament Replay System
+# This file is used for testing purposes
+
+obs:
+  host: "localhost"
+  port: 4455
+  password: "test_password"
+
+replay:
+  buffer_duration: "30s"
+  pre_roll_seconds: 3
+  min_interval: "5s"
+  queue_size: 5
+
+text:
+  source_name: "TestReplayText"
+  default_messages:
+    - "Test message 1"
+    - "Test message 2"
+  max_length: 50
+
+scene:
+  main_scene: "TestMain"
+  replay_scene: "TestReplay"
+
+logging:
+  level: "debug"
+  format: "console"

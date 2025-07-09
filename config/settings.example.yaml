@@ -1,0 +1,35 @@
+# Example configuration for HEMA Tournament Replay System
+# Copy this file to settings.yaml and customize for your environment
+
+obs:
+  host: "localhost"                    # OBS WebSocket host
+  port: 4455                          # OBS WebSocket port
+  password: ""                        # OBS WebSocket password (leave empty if none)
+
+replay:
+  buffer_duration: "60s"              # How long to buffer video (e.g., "60s", "2m")
+  pre_roll_seconds: 5                 # Seconds to include before the trigger
+  min_interval: "15s"                 # Minimum time between replays
+  queue_size: 10                      # Maximum number of queued replay requests
+
+text:
+  source_name: "ReplayText"           # Name of the text source in OBS
+  default_messages:                   # Default messages to show during replays
+    - "Point scored!"
+    - "Excellent exchange!"
+    - "Match continues..."
+  max_length: 100                     # Maximum length of text messages
+
+scene:
+  main_scene: "Main"                  # Name of the main scene in OBS
+  replay_scene: "Replay"              # Name of the replay scene in OBS
+
+logging:
+  level: "info"                       # Log level: debug, info, warn, error
+  format: "json"                      # Log format: json, console
+
+# Environment variables can override these settings:
+# HEMA_REPLAY_OBS_HOST=localhost
+# HEMA_REPLAY_OBS_PORT=4455
+# HEMA_REPLAY_OBS_PASSWORD=your_password
+# HEMA_REPLAY_LOGGING_LEVEL=debug

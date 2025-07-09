@@ -1,0 +1,26 @@
+obs:
+  host: "localhost"
+  port: 4455
+  password: ""
+
+replay:
+  buffer_duration: "60s"
+  pre_roll_seconds: 5
+  min_interval: "15s"
+  queue_size: 10
+
+text:
+  source_name: "ReplayText"
+  default_messages:
+    - "Point scored!"
+    - "Excellent exchange!"
+    - "Match continues..."
+  max_length: 100
+
+scene:
+  main_scene: "Main"
+  replay_scene: "Replay"
+
+logging:
+  level: "info"
+  format: "json"
