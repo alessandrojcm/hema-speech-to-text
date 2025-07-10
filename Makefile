@@ -45,6 +45,11 @@ test:
 	@echo "$(GREEN)Running tests...$(NC)"
 	$(GOTEST) -v -race ./...
 
+# Run integration tests (requires OBS Studio)
+test-integration:
+	@echo "$(GREEN)Running OBS integration tests...$(NC)"
+	@./scripts/test-obs-integration.sh
+
 # Run tests with coverage
 coverage:
 	@echo "$(GREEN)Running tests with coverage...$(NC)"
@@ -143,6 +148,7 @@ help:
 	@echo "  build        - Build the application"
 	@echo "  clean        - Clean build artifacts"
 	@echo "  test         - Run tests"
+	@echo "  test-integration - Run OBS integration tests (requires OBS Studio)"
 	@echo "  coverage     - Run tests with coverage report"
 	@echo "  deps         - Install dependencies"
 	@echo "  fmt          - Format code"
