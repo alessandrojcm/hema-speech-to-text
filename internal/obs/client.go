@@ -135,7 +135,7 @@ func (c *Client) handleEvents() {
 	}
 }
 
-func (c *Client) GetEventChannel() <-chan interface{} {
+func (c *Client) GetEventChannel() <-chan any {
 	return c.eventChan
 }
 

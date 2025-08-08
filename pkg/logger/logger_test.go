@@ -102,7 +102,7 @@ func TestLoggerOutput(t *testing.T) {
 
 	// Test that logger can write messages
 	logger.Info().Msg("test message")
-	
+
 	// Note: In a real implementation, we might want to capture stdout
 	// but for this test we'll just verify the logger doesn't panic
 	assert.NotNil(t, logger)

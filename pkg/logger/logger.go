@@ -3,7 +3,7 @@ package logger
 import (
 	"context"
 	"os"
-	
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -19,9 +19,9 @@ type Config struct {
 
 func New(config Config) (*Logger, error) {
 	level := parseLevel(config.Level)
-	
+
 	var logger zerolog.Logger
-	
+
 	switch config.Format {
 	case "json":
 		logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
@@ -30,9 +30,9 @@ func New(config Config) (*Logger, error) {
 	default:
 		logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
 	}
-	
+
 	logger = logger.Level(level)
-	
+
 	return &Logger{Logger: logger}, nil
 }
 

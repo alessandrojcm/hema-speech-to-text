@@ -16,10 +16,10 @@ type SourceInfo struct {
 }
 
 type ReplayBufferInfo struct {
-	Active       bool
-	Duration     time.Duration
-	OutputPath   string
-	LastSaved    time.Time
+	Active     bool
+	Duration   time.Duration
+	OutputPath string
+	LastSaved  time.Time
 }
 
 type TextSourceSettings struct {
@@ -38,7 +38,7 @@ type TextSourceSettings struct {
 type EventType string
 
 const (
-	EventSceneChanged     EventType = "scene_changed"
+	EventSceneChanged      EventType = "scene_changed"
 	EventReplayBufferSaved EventType = "replay_buffer_saved"
 	EventConnectionLost    EventType = "connection_lost"
 	EventSourceVisibility  EventType = "source_visibility"
@@ -47,5 +47,5 @@ const (
 type Event struct {
 	Type      EventType
 	Timestamp time.Time
-	Data      interface{}
+	Data      any
 }

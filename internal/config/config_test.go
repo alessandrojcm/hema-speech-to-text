@@ -345,11 +345,11 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadNoConfigFile(t *testing.T) {
 	// Load config with empty path (should use default paths)
 	config, err := Load("")
-	
+
 	// Should still succeed with defaults even if no config file is found
 	require.NoError(t, err)
 	assert.NotNil(t, config)
-	
+
 	// Check that defaults are applied
 	assert.Equal(t, "localhost", config.OBS.Host)
 	assert.Equal(t, 4455, config.OBS.Port)
