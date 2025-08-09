@@ -24,6 +24,51 @@ scene:
   main_scene: "Main"                  # Name of the main scene in OBS
   replay_scene: "Replay"              # Name of the replay scene in OBS
 
+audio:
+  device:
+    name: ""                          # Audio device name (empty for default)
+    id: -1                            # Audio device ID (-1 for default)
+    sample_rate: 44100                # Sample rate in Hz
+    channels: 2                       # Number of channels (1=mono, 2=stereo)
+    bit_depth: 16                     # Bit depth (16, 24, or 32)
+    frames_per_buffer: 1024           # Buffer size in frames
+    fallback_devices:                 # Fallback devices if primary fails
+      - "Built-in Microphone"
+      - "Default"
+    monitor_interval: "5s"            # Device health check interval
+
+  buffer:
+    duration: "60s"                   # Ring buffer duration
+    segment_size: "1s"                # Size of each buffer segment
+    overwrite_policy: "circular"      # How to handle buffer overflow
+    preallocate_size: 0               # Pre-allocate buffer size (0=auto)
+
+  processing:
+    enable_preprocessing: true        # Enable audio preprocessing
+    noise_reduction: true             # Enable noise reduction
+    normalization: true               # Enable audio normalization
+    highpass_filter: 80.0             # High-pass filter frequency (Hz)
+    lowpass_filter: 8000.0            # Low-pass filter frequency (Hz)
+    vad_threshold: 0.1                # Voice activity detection threshold
+    
+    # Library selection (use proven libraries vs custom implementations)
+    resampler_type: "gosamplerate"    # Resampler: "gosamplerate" or "custom"
+    vad_type: "webrtc"                # VAD: "webrtc" or "threshold"
+    wav_exporter_type: "goaudio"      # WAV export: "goaudio" or "custom"
+    fft_type: "gonum"                 # FFT: "gonum" or "custom"
+    
+    # Library-specific settings
+    resampler_quality: 0              # gosamplerate quality (0=best, 4=fastest)
+    vad_mode: 3                       # WebRTC VAD aggressiveness (0-3, 3=most aggressive)
+
+  extraction:
+    default_duration: "10s"           # Default extraction duration
+    max_concurrent: 5                 # Maximum concurrent extractions
+    output_format: "wav"              # Output format
+    output_sample_rate: 16000         # Output sample rate for speech recognition
+    output_channels: 1                # Output channels (mono for speech recognition)
+    timestamp_precision: "10ms"       # Timestamp precision
+
 logging:
   level: "info"                       # Log level: debug, info, warn, error
   format: "json"                      # Log format: json, console

@@ -124,3 +124,27 @@ type LatencyStats struct {
 	Max     time.Duration
 	Count   int64
 }
+
+type SystemMetrics struct {
+	// Processing metrics
+	TotalSamplesProcessed int64
+	TotalProcessingTime   time.Duration
+	AverageQualityScore   float64
+
+	// VAD metrics
+	VADDetections     int64
+	VADFalsePositives int64
+
+	// Extraction metrics
+	TotalExtractions      int64
+	FailedExtractions     int64
+	ExtractionFailureRate float64
+	AverageExtractionTime time.Duration
+
+	// System metrics
+	MemoryUsage int64
+	CPUUsage    float64
+
+	// Timestamp
+	LastUpdate time.Time
+}

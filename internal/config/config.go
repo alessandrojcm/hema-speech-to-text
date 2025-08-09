@@ -130,6 +130,16 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("audio.processing.lowpass_filter", 8000.0)
 	v.SetDefault("audio.processing.vad_threshold", 0.1)
 
+	// Library selection defaults
+	v.SetDefault("audio.processing.resampler_type", "gosamplerate")
+	v.SetDefault("audio.processing.vad_type", "webrtc")
+	v.SetDefault("audio.processing.wav_exporter_type", "goaudio")
+	v.SetDefault("audio.processing.fft_type", "gonum")
+
+	// Library-specific settings
+	v.SetDefault("audio.processing.resampler_quality", 0) // Best quality
+	v.SetDefault("audio.processing.vad_mode", 3)          // Most aggressive
+
 	v.SetDefault("audio.extraction.default_duration", "10s")
 	v.SetDefault("audio.extraction.max_concurrent", 5)
 	v.SetDefault("audio.extraction.output_format", "wav")
