@@ -6,7 +6,7 @@ require (
 	github.com/andreykaipov/goobs v1.2.3
 	github.com/rs/zerolog v1.32.0
 	github.com/spf13/viper v1.18.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 )
 
 require (
@@ -15,6 +15,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dh1tw/gosamplerate v0.1.2 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
+	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20250807023745-4245c77b654c // indirect
 	github.com/go-audio/audio v1.0.0 // indirect
 	github.com/go-audio/riff v1.0.0 // indirect
 	github.com/go-audio/wav v1.1.0 // indirect

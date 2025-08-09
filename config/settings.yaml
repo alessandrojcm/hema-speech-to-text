@@ -56,6 +56,51 @@ audio:
     output_channels: 1              # Output channels (mono for whisper)
     timestamp_precision: "10ms"     # Timestamp precision
 
+speech:
+  whisper:
+    model_path: "./models/ggml-base.bin"
+    model_size: "base"
+    language: "en"
+    use_gpu: true
+    thread_count: 4
+    max_tokens: 448
+    temperature: 0.0
+    beam_size: 5
+    word_timestamps: true
+  
+  vocabulary:
+    hema_vocab_path: "./config/hema_vocabulary.txt"
+    boost_weights:
+      "longsword": 2.0
+      "riposte": 1.8
+      "bind": 1.5
+      "halt": 2.5
+      "point": 2.0
+    context_switching: true
+    validation_rules:
+      - "validate_hema_terms"
+      - "check_phonetic_similarity"
+    custom_terms:
+      - "nachreisen"
+      - "zwerchhau"
+      - "zornhau"
+  
+  processing:
+    target_sample_rate: 16000
+    segment_duration: "10s"
+    overlap_duration: "1s"
+    noise_reduction: true
+    normalization: true
+    vad_enabled: true
+  
+  performance:
+    max_concurrent: 3
+    cache_size: 1000
+    cache_ttl: "5m"
+    timeout_duration: "30s"
+    memory_limit: 1073741824  # 1GB
+    metal_optimization: true
+
 logging:
   level: "info"
   format: "json"
