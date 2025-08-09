@@ -43,7 +43,12 @@ clean:
 # Run tests
 test:
 	@echo "$(GREEN)Running tests...$(NC)"
-	$(GOTEST) -v -race ./...
+	$(GOTEST) -tags noaudio -v -race ./...
+
+# Run tests with audio support (requires PortAudio and libsamplerate)
+test-audio:
+	@echo "$(GREEN)Running tests with audio support...$(NC)"
+	@export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$$PKG_CONFIG_PATH" && $(GOTEST) -v -race ./...
 
 # Run integration tests (requires OBS Studio)
 test-integration:
@@ -54,7 +59,7 @@ test-integration:
 coverage:
 	@echo "$(GREEN)Running tests with coverage...$(NC)"
 	@mkdir -p coverage
-	$(GOTEST) -v -race -coverprofile=coverage/coverage.out ./...
+	$(GOTEST) -tags noaudio -v -race -coverprofile=coverage/coverage.out ./...
 	$(GOCMD) tool cover -html=coverage/coverage.out -o coverage/coverage.html
 	@echo "$(GREEN)Coverage report generated: coverage/coverage.html$(NC)"
 

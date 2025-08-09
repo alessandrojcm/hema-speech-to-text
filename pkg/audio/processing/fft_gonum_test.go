@@ -1,0 +1,301 @@
+package processing
+
+import (
+	"math"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestGonumFFTProcessor(t *testing.T) {
+	processor := NewGonumFFTProcessor()
+	require.NotNil(t, processor)
+
+	t.Run("FFTBasic", func(t *testing.T) {
+		// Generate a simple sine wave
+		sampleRate := 1000
+		frequency := 100.0 // 100 Hz
+		samples := generateSineWave(sampleRate, frequency, 1.0, 1024)
+
+		// Compute FFT
+		fftResult := processor.FFT(samples)
+		require.NotNil(t, fftResult)
+		assert.Equal(t, len(samples), len(fftResult))
+
+		// The peak should be around the frequency bin corresponding to 100 Hz
+		// For 1000 Hz sample rate and 1024 samples, bin 102.4 ≈ bin 102
+		expectedBin := int(frequency * float64(len(samples)) / float64(sampleRate))
+
+		// Find the bin with maximum magnitude
+		maxMagnitude := 0.0
+		maxBin := 0
+		for i := 1; i < len(fftResult)/2; i++ { // Skip DC component
+			magnitude := real(fftResult[i])*real(fftResult[i]) + imag(fftResult[i])*imag(fftResult[i])
+			if magnitude > maxMagnitude {
+				maxMagnitude = magnitude
+				maxBin = i
+			}
+		}
+
+		// The maximum should be close to the expected bin
+		assert.InDelta(t, expectedBin, maxBin, 2.0) // Allow ±2 bins tolerance
+	})
+
+	t.Run("PowerSpectrum", func(t *testing.T) {
+		// Generate test signal with two frequencies
+		sampleRate := 2000
+		samples1 := generateSineWave(sampleRate, 200.0, 0.5, 512) // 200 Hz
+		samples2 := generateSineWave(sampleRate, 400.0, 0.3, 512) // 400 Hz
+
+		// Combine signals
+		samples := make([]float32, len(samples1))
+		for i := range samples {
+			samples[i] = samples1[i] + samples2[i]
+		}
+
+		// Compute power spectrum
+		powerSpectrum := processor.PowerSpectrum(samples)
+		require.NotNil(t, powerSpectrum)
+		assert.Equal(t, len(samples)/2+1, len(powerSpectrum))
+
+		// Find peaks
+		peaks := findPeaks(powerSpectrum, 0.01) // Threshold for peak detection
+		assert.GreaterOrEqual(t, len(peaks), 2) // Should find at least 2 peaks
+
+		// Convert peak bins to frequencies
+		peakFreqs := make([]float64, len(peaks))
+		for i, bin := range peaks {
+			peakFreqs[i] = float64(bin) * float64(sampleRate) / float64(len(samples))
+		}
+
+		// Check if we found frequencies close to 200 and 400 Hz
+		found200 := false
+		found400 := false
+		for _, freq := range peakFreqs {
+			if math.Abs(freq-200.0) < 20.0 {
+				found200 = true
+			}
+			if math.Abs(freq-400.0) < 20.0 {
+				found400 = true
+			}
+		}
+		assert.True(t, found200, "Should find peak near 200 Hz")
+		assert.True(t, found400, "Should find peak near 400 Hz")
+	})
+
+	t.Run("SpectralCentroid", func(t *testing.T) {
+		// Test with low frequency signal
+		lowFreqSamples := generateSineWave(1000, 100.0, 1.0, 512)
+		lowCentroid := processor.SpectralCentroid(lowFreqSamples)
+
+		// Test with high frequency signal
+		highFreqSamples := generateSineWave(1000, 400.0, 1.0, 512)
+		highCentroid := processor.SpectralCentroid(highFreqSamples)
+
+		// High frequency signal should have higher spectral centroid
+		assert.Greater(t, highCentroid, lowCentroid)
+	})
+
+	t.Run("EmptyInput", func(t *testing.T) {
+		// Test with empty input
+		fftResult := processor.FFT([]float32{})
+		assert.Nil(t, fftResult)
+
+		powerSpectrum := processor.PowerSpectrum([]float32{})
+		assert.Nil(t, powerSpectrum)
+
+		centroid := processor.SpectralCentroid([]float32{})
+		assert.Equal(t, 0.0, centroid)
+	})
+}
+
+func TestGonumWindowFunction(t *testing.T) {
+	windowFunc := NewGonumWindowFunction()
+	require.NotNil(t, windowFunc)
+
+	t.Run("HannWindow", func(t *testing.T) {
+		size := 256
+		window := windowFunc.GetWindow(size, "hann")
+		require.NotNil(t, window)
+		assert.Equal(t, size, len(window))
+
+		// Hann window should start and end with 0
+		assert.InDelta(t, 0.0, window[0], 0.001)
+		assert.InDelta(t, 0.0, window[size-1], 0.001)
+
+		// Maximum should be around the middle
+		maxVal := float32(0.0)
+		maxIdx := 0
+		for i, val := range window {
+			if val > maxVal {
+				maxVal = val
+				maxIdx = i
+			}
+		}
+		assert.InDelta(t, size/2, maxIdx, float64(size)/10) // Within 10% of center
+		assert.InDelta(t, 1.0, maxVal, 0.1)                 // Close to 1.0
+	})
+
+	t.Run("HammingWindow", func(t *testing.T) {
+		size := 128
+		window := windowFunc.GetWindow(size, "hamming")
+		require.NotNil(t, window)
+		assert.Equal(t, size, len(window))
+
+		// Hamming window should have small non-zero values at edges
+		assert.Greater(t, window[0], float32(0.0))
+		assert.Greater(t, window[size-1], float32(0.0))
+		assert.Less(t, window[0], float32(0.1))
+		assert.Less(t, window[size-1], float32(0.1))
+	})
+
+	t.Run("BlackmanWindow", func(t *testing.T) {
+		size := 64
+		window := windowFunc.GetWindow(size, "blackman")
+		require.NotNil(t, window)
+		assert.Equal(t, size, len(window))
+
+		// Blackman window should start and end near 0
+		assert.InDelta(t, 0.0, window[0], 0.001)
+		assert.InDelta(t, 0.0, window[size-1], 0.001)
+	})
+
+	t.Run("ApplyWindow", func(t *testing.T) {
+		// Generate test signal
+		samples := generateSineWave(1000, 100.0, 1.0, 256)
+		originalSum := float32(0.0)
+		for _, sample := range samples {
+			originalSum += sample * sample
+		}
+
+		// Apply Hann window
+		windowed := windowFunc.Apply(samples, "hann")
+		require.NotNil(t, windowed)
+		assert.Equal(t, len(samples), len(windowed))
+
+		// Windowed signal should have less energy
+		windowedSum := float32(0.0)
+		for _, sample := range windowed {
+			windowedSum += sample * sample
+		}
+		assert.Less(t, windowedSum, originalSum)
+
+		// Original samples should be unchanged
+		originalSamples := generateSineWave(1000, 100.0, 1.0, 256)
+		for i, sample := range samples {
+			assert.Equal(t, originalSamples[i], sample)
+		}
+	})
+
+	t.Run("UnknownWindowType", func(t *testing.T) {
+		size := 128
+		window := windowFunc.GetWindow(size, "unknown")
+		require.NotNil(t, window)
+		assert.Equal(t, size, len(window))
+
+		// Should default to Hann window
+		hannWindow := windowFunc.GetWindow(size, "hann")
+		for i, val := range window {
+			assert.Equal(t, hannWindow[i], val)
+		}
+	})
+}
+
+func TestZeroCrossingRate(t *testing.T) {
+	t.Run("SineWave", func(t *testing.T) {
+		// Generate sine wave
+		samples := generateSineWave(1000, 100.0, 1.0, 1000) // 100 Hz for 1 second
+		zcr := ZeroCrossingRate(samples)
+
+		// For a 100 Hz sine wave, we expect about 200 zero crossings per second
+		// (2 crossings per cycle)
+		expectedZCR := 200.0 / 1000.0             // 200 crossings in 1000 samples
+		assert.InDelta(t, expectedZCR, zcr, 0.05) // Allow 5% tolerance
+	})
+
+	t.Run("ConstantSignal", func(t *testing.T) {
+		// Constant positive signal
+		samples := make([]float32, 100)
+		for i := range samples {
+			samples[i] = 0.5
+		}
+		zcr := ZeroCrossingRate(samples)
+		assert.Equal(t, 0.0, zcr) // No zero crossings
+	})
+
+	t.Run("AlternatingSignal", func(t *testing.T) {
+		// Alternating +1, -1 signal
+		samples := make([]float32, 100)
+		for i := range samples {
+			if i%2 == 0 {
+				samples[i] = 1.0
+			} else {
+				samples[i] = -1.0
+			}
+		}
+		zcr := ZeroCrossingRate(samples)
+		assert.InDelta(t, 1.0, zcr, 0.01) // Maximum possible ZCR
+	})
+
+	t.Run("EmptyInput", func(t *testing.T) {
+		zcr := ZeroCrossingRate([]float32{})
+		assert.Equal(t, 0.0, zcr)
+	})
+
+	t.Run("SingleSample", func(t *testing.T) {
+		zcr := ZeroCrossingRate([]float32{1.0})
+		assert.Equal(t, 0.0, zcr)
+	})
+}
+
+// Helper functions
+
+func generateSineWave(sampleRate int, frequency, amplitude float64, numSamples int) []float32 {
+	samples := make([]float32, numSamples)
+	for i := 0; i < numSamples; i++ {
+		t := float64(i) / float64(sampleRate)
+		samples[i] = float32(amplitude * math.Sin(2*math.Pi*frequency*t))
+	}
+	return samples
+}
+
+func findPeaks(spectrum []float64, threshold float64) []int {
+	var peaks []int
+	for i := 1; i < len(spectrum)-1; i++ {
+		if spectrum[i] > threshold && spectrum[i] > spectrum[i-1] && spectrum[i] > spectrum[i+1] {
+			peaks = append(peaks, i)
+		}
+	}
+	return peaks
+}
+
+func BenchmarkGonumFFT(b *testing.B) {
+	processor := NewGonumFFTProcessor()
+	samples := generateSineWave(44100, 1000.0, 1.0, 1024)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		processor.FFT(samples)
+	}
+}
+
+func BenchmarkGonumPowerSpectrum(b *testing.B) {
+	processor := NewGonumFFTProcessor()
+	samples := generateSineWave(44100, 1000.0, 1.0, 1024)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		processor.PowerSpectrum(samples)
+	}
+}
+
+func BenchmarkWindowFunction(b *testing.B) {
+	windowFunc := NewGonumWindowFunction()
+	samples := generateSineWave(44100, 1000.0, 1.0, 1024)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		windowFunc.Apply(samples, "hann")
+	}
+}

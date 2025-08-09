@@ -6,14 +6,16 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+	"github.com/your-org/hema-replay-system/pkg/audio/types"
 )
 
 type Config struct {
-	OBS     OBSConfig     `mapstructure:"obs"`
-	Replay  ReplayConfig  `mapstructure:"replay"`
-	Text    TextConfig    `mapstructure:"text"`
-	Scene   SceneConfig   `mapstructure:"scene"`
-	Logging LoggingConfig `mapstructure:"logging"`
+	OBS     OBSConfig         `mapstructure:"obs"`
+	Replay  ReplayConfig      `mapstructure:"replay"`
+	Text    TextConfig        `mapstructure:"text"`
+	Scene   SceneConfig       `mapstructure:"scene"`
+	Audio   types.AudioConfig `mapstructure:"audio"`
+	Logging LoggingConfig     `mapstructure:"logging"`
 }
 
 type OBSConfig struct {
@@ -106,6 +108,35 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("scene.main_scene", "Main")
 	v.SetDefault("scene.replay_scene", "Replay")
 
+	// Audio defaults
+	v.SetDefault("audio.device.name", "")
+	v.SetDefault("audio.device.id", -1)
+	v.SetDefault("audio.device.sample_rate", 44100)
+	v.SetDefault("audio.device.channels", 2)
+	v.SetDefault("audio.device.bit_depth", 16)
+	v.SetDefault("audio.device.frames_per_buffer", 1024)
+	v.SetDefault("audio.device.fallback_devices", []string{"Built-in Microphone", "Default"})
+	v.SetDefault("audio.device.monitor_interval", "5s")
+
+	v.SetDefault("audio.buffer.duration", "60s")
+	v.SetDefault("audio.buffer.segment_size", "1s")
+	v.SetDefault("audio.buffer.overwrite_policy", "circular")
+	v.SetDefault("audio.buffer.preallocate_size", 0)
+
+	v.SetDefault("audio.processing.enable_preprocessing", true)
+	v.SetDefault("audio.processing.noise_reduction", true)
+	v.SetDefault("audio.processing.normalization", true)
+	v.SetDefault("audio.processing.highpass_filter", 80.0)
+	v.SetDefault("audio.processing.lowpass_filter", 8000.0)
+	v.SetDefault("audio.processing.vad_threshold", 0.1)
+
+	v.SetDefault("audio.extraction.default_duration", "10s")
+	v.SetDefault("audio.extraction.max_concurrent", 5)
+	v.SetDefault("audio.extraction.output_format", "wav")
+	v.SetDefault("audio.extraction.output_sample_rate", 16000)
+	v.SetDefault("audio.extraction.output_channels", 1)
+	v.SetDefault("audio.extraction.timestamp_precision", "10ms")
+
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
@@ -129,6 +160,11 @@ func validateConfig(config *Config) error {
 	}
 	if config.Scene.ReplayScene == "" {
 		return fmt.Errorf("scene.replay_scene cannot be empty")
+	}
+
+	// Validate audio configuration
+	if err := config.Audio.Validate(); err != nil {
+		return fmt.Errorf("audio configuration invalid: %w", err)
 	}
 
 	return nil

@@ -1,7 +1,8 @@
 # AGENTS.md - Development Guide for AI Coding Agents
 
 ## Build/Test Commands
-- `make test` - Run all tests with race detection
+- `make test` - Run all tests with race detection (uses noaudio build tag)
+- `make test-audio` - Run tests with full audio support (requires PortAudio)
 - `go test ./internal/config -v` - Run single package tests
 - `go test -run TestFunctionName ./path/to/package` - Run specific test
 - `make test-integration` - Run OBS integration tests (requires OBS Studio)
@@ -23,5 +24,16 @@
 
 ## Project Structure
 - **Phase 1 Complete**: Configuration, OBS integration, replay management, text overlays, scene management
+- **Phase 2 Complete**: Audio capture system with ring buffer, PortAudio integration, processing pipeline
 - **Integration Tests**: Use `t.Skip("Integration test - requires running OBS Studio")` for OBS-dependent tests
 - **Manager Pattern**: Each subsystem has a Manager struct with Start/Stop lifecycle methods
+- **Build Tags**: Use `noaudio` build tag for development without PortAudio dependencies
+
+## Audio System Architecture (Phase 2)
+- **pkg/audio/types/**: Core audio types, configuration, and error definitions
+- **pkg/audio/buffer/**: Thread-safe ring buffer with segment management and metadata
+- **pkg/audio/capture/**: PortAudio integration, device management, and capture engine
+- **pkg/audio/processing/**: Audio processing pipeline with filters, conversion, and quality assessment
+- **pkg/audio/internal/**: Error handling, metrics collection, and PortAudio wrapper
+- **Audio Manager**: Unified API with health monitoring and concurrent extraction support
+- **Configuration**: Full integration with existing YAML config system under `audio:` section

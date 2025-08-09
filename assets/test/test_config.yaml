@@ -23,6 +23,44 @@ scene:
   main_scene: "TestMain"
   replay_scene: "TestReplay"
 
+audio:
+  device:
+    name: ""
+    id: -1
+    sample_rate: 44100
+    channels: 2
+    bit_depth: 16
+    frames_per_buffer: 1024
+    fallback_devices:
+      - "Built-in Microphone"
+      - "Default"
+    monitor_interval: "5s"
+  buffer:
+    duration: "60s"
+    segment_size: "1s"
+    overwrite_policy: "circular"
+    preallocate_size: 0
+  processing:
+    enable_preprocessing: true
+    noise_reduction: true
+    normalization: true
+    highpass_filter: 80.0
+    lowpass_filter: 8000.0
+    vad_threshold: 0.1
+    resampler_type: "gosamplerate"
+    vad_type: "webrtc"
+    wav_exporter_type: "goaudio"
+    fft_type: "gonum"
+    resampler_quality: 0
+    vad_mode: 3
+  extraction:
+    default_duration: "10s"
+    max_concurrent: 5
+    output_format: "wav"
+    output_sample_rate: 16000
+    output_channels: 1
+    timestamp_precision: "10ms"
+
 logging:
   level: "debug"
   format: "console"

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/your-org/hema-replay-system/pkg/audio/types"
 )
 
 func TestLoad(t *testing.T) {
@@ -41,6 +42,15 @@ scene:
   main_scene: "TestMain"
   replay_scene: "TestReplay"
 
+audio:
+  processing:
+    resampler_type: "gosamplerate"
+    vad_type: "webrtc"
+    wav_exporter_type: "goaudio"
+    fft_type: "gonum"
+    resampler_quality: 0
+    vad_mode: 3
+
 logging:
   level: "debug"
   format: "console"
@@ -66,6 +76,7 @@ logging:
 					MainScene:   "TestMain",
 					ReplayScene: "TestReplay",
 				},
+				Audio: types.DefaultAudioConfig(),
 				Logging: LoggingConfig{
 					Level:  "debug",
 					Format: "console",
@@ -149,6 +160,7 @@ func TestValidateConfig(t *testing.T) {
 					MainScene:   "Main",
 					ReplayScene: "Replay",
 				},
+				Audio: types.DefaultAudioConfig(),
 			},
 			expectError: false,
 		},
