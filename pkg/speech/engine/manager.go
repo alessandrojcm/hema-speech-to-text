@@ -8,18 +8,22 @@ import (
 
 	"github.com/rs/zerolog"
 	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
-	"github.com/your-org/hema-replay-system/pkg/speech/types"
+	"github.com/your-org/hema-replay-system/pkg/speech/internal"
+	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 	"github.com/your-org/hema-replay-system/pkg/speech/vocabulary"
 	"github.com/your-org/hema-replay-system/pkg/speech/whisper"
+	// ❌ preprocessing removed - using pkg/audio/processing instead
 )
 
 // SpeechManager manages the complete speech recognition pipeline
 type SpeechManager struct {
-	config       types.SpeechConfig
+	config       speechTypes.SpeechConfig
 	modelManager *whisper.ModelManager
 	vocabulary   *vocabulary.HEMAVocabulary
-	cache        *ResultCache
-	pipeline     *ProcessingPipeline
+	// ❌ preprocessor removed - using pkg/audio/processing instead
+	cache    *ResultCache
+	pipeline *ProcessingPipeline
+	metrics  *internal.SpeechMetrics
 
 	// Concurrency control
 	semaphore   chan struct{}
@@ -40,16 +44,16 @@ type SpeechManager struct {
 // TranscriptionTask represents an active transcription task
 type TranscriptionTask struct {
 	ID        string
-	Request   types.TranscriptionRequest
+	Request   speechTypes.TranscriptionRequest
 	StartTime time.Time
-	Done      chan *types.TranscriptionResult
+	Done      chan *speechTypes.TranscriptionResult
 	Error     chan error
 	Context   context.Context
 	Cancel    context.CancelFunc
 }
 
 // NewSpeechManager creates a new speech recognition manager
-func NewSpeechManager(config types.SpeechConfig, logger zerolog.Logger) (*SpeechManager, error) {
+func NewSpeechManager(config speechTypes.SpeechConfig, logger zerolog.Logger) (*SpeechManager, error) {
 	modelManager := whisper.NewModelManager(config.Whisper, logger)
 
 	vocab := vocabulary.NewHEMAVocabulary(logger)
@@ -60,7 +64,13 @@ func NewSpeechManager(config types.SpeechConfig, logger zerolog.Logger) (*Speech
 	}
 
 	cache := NewResultCache(config.Performance.CacheSize, config.Performance.CacheTTL, logger)
-	pipeline := NewProcessingPipeline(config, logger)
+	pipeline, err := NewProcessingPipeline(config, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create processing pipeline: %w", err)
+	}
+
+	// Initialize metrics collection
+	metrics := internal.NewSpeechMetrics(logger)
 
 	// Set up pipeline dependencies
 	pipeline.SetModelManager(modelManager)
@@ -70,11 +80,13 @@ func NewSpeechManager(config types.SpeechConfig, logger zerolog.Logger) (*Speech
 		config:       config,
 		modelManager: modelManager,
 		vocabulary:   vocab,
-		cache:        cache,
-		pipeline:     pipeline,
-		semaphore:    make(chan struct{}, config.Performance.MaxConcurrent),
-		activeTasks:  make(map[string]*TranscriptionTask),
-		logger:       logger.With().Str("component", "speech_manager").Logger(),
+		// ❌ preprocessor removed - using pkg/audio/processing instead
+		cache:       cache,
+		pipeline:    pipeline,
+		metrics:     metrics,
+		semaphore:   make(chan struct{}, config.Performance.MaxConcurrent),
+		activeTasks: make(map[string]*TranscriptionTask),
+		logger:      logger.With().Str("component", "speech_manager").Logger(),
 	}, nil
 }
 
@@ -124,13 +136,13 @@ func (sm *SpeechManager) Stop() error {
 }
 
 // TranscribeAudio transcribes an audio segment
-func (sm *SpeechManager) TranscribeAudio(ctx context.Context, audioSegment *audioTypes.AudioSegment) (*types.TranscriptionResult, error) {
+func (sm *SpeechManager) TranscribeAudio(ctx context.Context, audioSegment *audioTypes.AudioSegment) (*speechTypes.TranscriptionResult, error) {
 	if !sm.running {
 		return nil, fmt.Errorf("speech manager not running")
 	}
 
 	// Create transcription request
-	request := types.TranscriptionRequest{
+	request := speechTypes.TranscriptionRequest{
 		ID:                  generateID(),
 		AudioSegment:        audioSegment,
 		Language:            sm.config.Whisper.Language,
@@ -144,7 +156,7 @@ func (sm *SpeechManager) TranscribeAudio(ctx context.Context, audioSegment *audi
 }
 
 // ProcessTranscriptionRequest processes a transcription request
-func (sm *SpeechManager) ProcessTranscriptionRequest(ctx context.Context, request types.TranscriptionRequest) (*types.TranscriptionResult, error) {
+func (sm *SpeechManager) ProcessTranscriptionRequest(ctx context.Context, request speechTypes.TranscriptionRequest) (*speechTypes.TranscriptionResult, error) {
 	startTime := time.Now()
 
 	// Check cache first
@@ -170,7 +182,7 @@ func (sm *SpeechManager) ProcessTranscriptionRequest(ctx context.Context, reques
 		ID:        request.ID,
 		Request:   request,
 		StartTime: startTime,
-		Done:      make(chan *types.TranscriptionResult, 1),
+		Done:      make(chan *speechTypes.TranscriptionResult, 1),
 		Error:     make(chan error, 1),
 		Context:   taskCtx,
 		Cancel:    cancel,

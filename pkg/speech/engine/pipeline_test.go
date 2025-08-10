@@ -8,11 +8,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 
-	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
 	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
-func createTestProcessingPipeline() *ProcessingPipeline {
+func createTestProcessingPipeline(t *testing.T) *ProcessingPipeline {
 	config := speechTypes.SpeechConfig{
 		Processing: speechTypes.ProcessingConfig{
 			TargetSampleRate: 16000,
@@ -24,8 +23,12 @@ func createTestProcessingPipeline() *ProcessingPipeline {
 		},
 	}
 
-	logger := zerolog.New(zerolog.NewTestWriter(nil))
-	return NewProcessingPipeline(config, logger)
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	pipeline, err := NewProcessingPipeline(config, logger)
+	if err != nil {
+		t.Fatalf("Failed to create pipeline: %v", err)
+	}
+	return pipeline
 }
 
 func TestNewProcessingPipeline(t *testing.T) {
@@ -36,15 +39,18 @@ func TestNewProcessingPipeline(t *testing.T) {
 		},
 	}
 
-	logger := zerolog.New(zerolog.NewTestWriter(nil))
-	pipeline := NewProcessingPipeline(config, logger)
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	pipeline, err := NewProcessingPipeline(config, logger)
+	if err != nil {
+		t.Fatalf("Failed to create pipeline: %v", err)
+	}
 
 	assert.NotNil(t, pipeline)
 	assert.Equal(t, config, pipeline.config)
 }
 
 func TestProcessingPipeline_SetDependencies(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	// Test setting model manager (would be nil without actual whisper setup)
 	pipeline.SetModelManager(nil)
@@ -57,7 +63,7 @@ func TestProcessingPipeline_SetDependencies(t *testing.T) {
 }
 
 func TestProcessingPipeline_Process_NilRequest(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	ctx := context.Background()
 	result, err := pipeline.Process(ctx, speechTypes.TranscriptionRequest{})
@@ -67,32 +73,16 @@ func TestProcessingPipeline_Process_NilRequest(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func TestProcessingPipeline_PrepareAudioData_NilSegment(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+func TestProcessingPipeline_Close(t *testing.T) {
+	pipeline := createTestProcessingPipeline(t)
 
-	result, err := pipeline.prepareAudioData(nil)
+	err := pipeline.Close()
 
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "empty audio segment")
-}
-
-func TestProcessingPipeline_PrepareAudioData_EmptySegment(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
-
-	segment := &audioTypes.AudioSegment{
-		Data: []float32{},
-	}
-
-	result, err := pipeline.prepareAudioData(segment)
-
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "empty audio segment")
+	assert.NoError(t, err)
 }
 
 func TestProcessingPipeline_ApplyBoost(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	tests := []struct {
 		name       string
@@ -135,7 +125,7 @@ func TestProcessingPipeline_ApplyBoost(t *testing.T) {
 }
 
 func TestProcessingPipeline_RecalculateSegmentConfidence(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	segment := &speechTypes.TranscriptionSegment{
 		Text:       "hello world",
@@ -153,7 +143,7 @@ func TestProcessingPipeline_RecalculateSegmentConfidence(t *testing.T) {
 }
 
 func TestProcessingPipeline_RecalculateSegmentConfidence_EmptyTokens(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	segment := &speechTypes.TranscriptionSegment{
 		Text:       "hello world",
@@ -169,7 +159,7 @@ func TestProcessingPipeline_RecalculateSegmentConfidence_EmptyTokens(t *testing.
 }
 
 func TestProcessingPipeline_RecalculateOverallConfidence(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	result := &speechTypes.TranscriptionResult{
 		Text:       "hello world test",
@@ -188,7 +178,7 @@ func TestProcessingPipeline_RecalculateOverallConfidence(t *testing.T) {
 }
 
 func TestProcessingPipeline_ContextCancellation(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	// Create a context that's already cancelled
 	ctx, cancel := context.WithCancel(context.Background())
@@ -207,7 +197,7 @@ func TestProcessingPipeline_ContextCancellation(t *testing.T) {
 }
 
 func TestProcessingPipeline_Timeout(t *testing.T) {
-	pipeline := createTestProcessingPipeline()
+	pipeline := createTestProcessingPipeline(t)
 
 	// Create a context with a very short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)

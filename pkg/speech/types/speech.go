@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
@@ -88,10 +89,31 @@ func (ms ModelSize) String() string {
 	}
 }
 
+// UnmarshalText implements the encoding.TextUnmarshaler interface
+func (ms *ModelSize) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "tiny":
+		*ms = ModelTiny
+	case "base":
+		*ms = ModelBase
+	case "small":
+		*ms = ModelSmall
+	case "medium":
+		*ms = ModelMedium
+	case "large":
+		*ms = ModelLarge
+	default:
+		return fmt.Errorf("unknown model size: %s", string(text))
+	}
+	return nil
+}
+
 // WhisperParams represents parameters for whisper transcription
 type WhisperParams struct {
 	Language       string
 	ThreadCount    int
 	Temperature    float32
+	BeamSize       int
+	MaxTokens      int
 	WordTimestamps bool
 }

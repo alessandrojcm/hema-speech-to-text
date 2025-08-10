@@ -45,8 +45,8 @@ func NewResultCache(maxSize int, ttl time.Duration, logger zerolog.Logger) *Resu
 
 // Get retrieves a cached result
 func (rc *ResultCache) Get(key string) *types.TranscriptionResult {
-	rc.mu.RLock()
-	defer rc.mu.RUnlock()
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
 
 	entry, exists := rc.cache[key]
 	if !exists {
@@ -57,7 +57,7 @@ func (rc *ResultCache) Get(key string) *types.TranscriptionResult {
 	// Check if expired
 	if time.Now().After(entry.ExpiresAt) {
 		rc.misses++
-		// Don't delete here to avoid write lock, cleanup goroutine will handle it
+		// Don't delete here to avoid complexity, cleanup goroutine will handle it
 		return nil
 	}
 

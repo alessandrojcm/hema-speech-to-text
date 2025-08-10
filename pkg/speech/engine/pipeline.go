@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rs/zerolog"
-	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
+	"github.com/your-org/hema-replay-system/pkg/speech/preprocessing"
 	"github.com/your-org/hema-replay-system/pkg/speech/types"
 	"github.com/your-org/hema-replay-system/pkg/speech/vocabulary"
 	"github.com/your-org/hema-replay-system/pkg/speech/whisper"
@@ -16,15 +16,23 @@ type ProcessingPipeline struct {
 	config       types.SpeechConfig
 	modelManager *whisper.ModelManager
 	vocabulary   *vocabulary.HEMAVocabulary
+	preprocessor *preprocessing.SpeechAudioPreprocessor
 	logger       zerolog.Logger
 }
 
 // NewProcessingPipeline creates a new processing pipeline
-func NewProcessingPipeline(config types.SpeechConfig, logger zerolog.Logger) *ProcessingPipeline {
-	return &ProcessingPipeline{
-		config: config,
-		logger: logger.With().Str("component", "processing_pipeline").Logger(),
+func NewProcessingPipeline(config types.SpeechConfig, logger zerolog.Logger) (*ProcessingPipeline, error) {
+	// Create audio preprocessor for speech recognition
+	preprocessor, err := preprocessing.NewSpeechAudioPreprocessor(config.Processing, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create audio preprocessor: %w", err)
 	}
+
+	return &ProcessingPipeline{
+		config:       config,
+		preprocessor: preprocessor,
+		logger:       logger.With().Str("component", "processing_pipeline").Logger(),
+	}, nil
 }
 
 // SetModelManager sets the model manager for the pipeline
@@ -45,8 +53,8 @@ func (pp *ProcessingPipeline) Process(ctx context.Context, request types.Transcr
 		return nil, fmt.Errorf("failed to get model: %w", err)
 	}
 
-	// Step 2: Prepare audio data
-	audioData, err := pp.prepareAudioData(request.AudioSegment)
+	// Step 2: Prepare audio data using enhanced preprocessing
+	audioData, err := pp.preprocessor.PrepareAudioForSpeech(request.AudioSegment)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare audio data: %w", err)
 	}
@@ -81,32 +89,12 @@ func (pp *ProcessingPipeline) Process(ctx context.Context, request types.Transcr
 	return result, nil
 }
 
-// prepareAudioData converts audio segment to format expected by whisper
-func (pp *ProcessingPipeline) prepareAudioData(segment *audioTypes.AudioSegment) ([]float32, error) {
-	// For now, assume the audio data is already in the correct format
-	// In a full implementation, this would handle:
-	// - Sample rate conversion to 16kHz
-	// - Channel conversion to mono
-	// - Format conversion to float32
-	// - Normalization
-
-	if segment == nil || len(segment.Data) == 0 {
-		return nil, fmt.Errorf("empty audio segment")
+// Close releases resources used by the pipeline
+func (pp *ProcessingPipeline) Close() error {
+	if pp.preprocessor != nil {
+		return pp.preprocessor.Close()
 	}
-
-	// Convert byte data to float32 samples
-	// This is a simplified conversion - real implementation would depend on the audio format
-	samples := make([]float32, len(segment.Data)/2) // Assuming 16-bit samples
-
-	for i := 0; i < len(samples); i++ {
-		if i*2+1 < len(segment.Data) {
-			// Convert 16-bit PCM to float32 (-1.0 to 1.0)
-			sample := int16(segment.Data[i*2]) | int16(segment.Data[i*2+1])<<8
-			samples[i] = float32(sample) / 32768.0
-		}
-	}
-
-	return samples, nil
+	return nil
 }
 
 // applyVocabularyBoosting applies HEMA vocabulary boosting to the result

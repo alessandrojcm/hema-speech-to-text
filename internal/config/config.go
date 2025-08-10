@@ -2,20 +2,24 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
+	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
 type Config struct {
-	OBS     OBSConfig         `mapstructure:"obs"`
-	Replay  ReplayConfig      `mapstructure:"replay"`
-	Text    TextConfig        `mapstructure:"text"`
-	Scene   SceneConfig       `mapstructure:"scene"`
-	Audio   types.AudioConfig `mapstructure:"audio"`
-	Logging LoggingConfig     `mapstructure:"logging"`
+	OBS     OBSConfig                `mapstructure:"obs"`
+	Replay  ReplayConfig             `mapstructure:"replay"`
+	Text    TextConfig               `mapstructure:"text"`
+	Scene   SceneConfig              `mapstructure:"scene"`
+	Audio   types.AudioConfig        `mapstructure:"audio"`
+	Speech  speechTypes.SpeechConfig `mapstructure:"speech"`
+	Logging LoggingConfig            `mapstructure:"logging"`
 }
 
 type OBSConfig struct {
@@ -76,7 +80,21 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	var config Config
-	if err := v.Unmarshal(&config); err != nil {
+
+	// Create decoder with custom hooks for speech types
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			stringToModelSizeHookFunc(),
+		),
+		WeaklyTypedInput: true,
+		Result:           &config,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create decoder: %w", err)
+	}
+
+	if err := decoder.Decode(v.AllSettings()); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
@@ -147,6 +165,34 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("audio.extraction.output_channels", 1)
 	v.SetDefault("audio.extraction.timestamp_precision", "10ms")
 
+	// Speech defaults
+	v.SetDefault("speech.whisper.model_path", "./models/ggml-base.bin")
+	v.SetDefault("speech.whisper.model_size", "base")
+	v.SetDefault("speech.whisper.language", "en")
+	v.SetDefault("speech.whisper.use_gpu", true)
+	v.SetDefault("speech.whisper.thread_count", 4)
+	v.SetDefault("speech.whisper.max_tokens", 448)
+	v.SetDefault("speech.whisper.temperature", 0.0)
+	v.SetDefault("speech.whisper.beam_size", 5)
+	v.SetDefault("speech.whisper.word_timestamps", true)
+
+	v.SetDefault("speech.vocabulary.hema_vocab_path", "./config/hema_vocabulary.txt")
+	v.SetDefault("speech.vocabulary.context_switching", true)
+
+	v.SetDefault("speech.processing.target_sample_rate", 16000)
+	v.SetDefault("speech.processing.segment_duration", "10s")
+	v.SetDefault("speech.processing.overlap_duration", "1s")
+	v.SetDefault("speech.processing.noise_reduction", true)
+	v.SetDefault("speech.processing.normalization", true)
+	v.SetDefault("speech.processing.vad_enabled", true)
+
+	v.SetDefault("speech.performance.max_concurrent", 3)
+	v.SetDefault("speech.performance.cache_size", 1000)
+	v.SetDefault("speech.performance.cache_ttl", "5m")
+	v.SetDefault("speech.performance.timeout_duration", "30s")
+	v.SetDefault("speech.performance.memory_limit", 1073741824) // 1GB
+	v.SetDefault("speech.performance.metal_optimization", true)
+
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
@@ -177,5 +223,43 @@ func validateConfig(config *Config) error {
 		return fmt.Errorf("audio configuration invalid: %w", err)
 	}
 
+	// Validate speech configuration
+	if config.Speech.Whisper.ModelPath == "" {
+		return fmt.Errorf("speech.whisper.model_path cannot be empty")
+	}
+	if config.Speech.Performance.MaxConcurrent <= 0 {
+		return fmt.Errorf("speech.performance.max_concurrent must be positive")
+	}
+	if config.Speech.Performance.TimeoutDuration <= 0 {
+		return fmt.Errorf("speech.performance.timeout_duration must be positive")
+	}
+
 	return nil
+}
+
+// stringToModelSizeHookFunc returns a DecodeHookFunc that converts strings to ModelSize
+func stringToModelSizeHookFunc() mapstructure.DecodeHookFunc {
+	return func(
+		f reflect.Type,
+		t reflect.Type,
+		data interface{},
+	) (interface{}, error) {
+		// Check if we're converting from string to ModelSize
+		if f.Kind() != reflect.String {
+			return data, nil
+		}
+
+		if t != reflect.TypeOf(speechTypes.ModelSize(0)) {
+			return data, nil
+		}
+
+		// Convert string to ModelSize
+		str := data.(string)
+		var modelSize speechTypes.ModelSize
+		if err := modelSize.UnmarshalText([]byte(str)); err != nil {
+			return nil, err
+		}
+
+		return modelSize, nil
+	}
 }

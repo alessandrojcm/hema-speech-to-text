@@ -14,6 +14,8 @@ MAIN_PATH=./cmd/replay-system
 # Build flags
 LDFLAGS=-ldflags "-s -w"
 BUILD_FLAGS=-trimpath $(LDFLAGS)
+C_INCLUDE_PATH=$(pwd)/whisper.cpp/src/whisper.cpp
+LIBRARY_PATH=$(pwd)/whisper.cpp/build_go/src/libwhisper.a
 
 # Colors for output
 GREEN=\033[0;32m
