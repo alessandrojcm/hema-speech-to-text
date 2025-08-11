@@ -4,7 +4,6 @@ package processing
 
 import (
 	"fmt"
-	"unsafe"
 
 	"github.com/baabaaox/go-webrtcvad"
 )
@@ -104,8 +103,15 @@ func (v *WebRTCVAD) DetectVoice(samples []float32) bool {
 			int16Samples[j] = int16(sample * 32767)
 		}
 
-		// Convert int16 samples to bytes
-		audioBytes := (*[2]byte)(unsafe.Pointer(&int16Samples[0]))[:len(int16Samples)*2]
+		// Convert int16 samples to bytes safely
+		if len(int16Samples) == 0 {
+			continue // Skip empty chunks
+		}
+		audioBytes := make([]byte, len(int16Samples)*2)
+		for i, sample := range int16Samples {
+			audioBytes[i*2] = byte(sample)
+			audioBytes[i*2+1] = byte(sample >> 8)
+		}
 
 		// Process with WebRTC VAD
 		active, err := webrtcvad.Process(v.detector, v.sampleRate, audioBytes, len(int16Samples))
@@ -237,8 +243,15 @@ func (v *WebRTCVAD) ProcessFrame(samples []float32) (bool, error) {
 		int16Samples[i] = int16(sample * 32767)
 	}
 
-	// Convert int16 samples to bytes
-	audioBytes := (*[2]byte)(unsafe.Pointer(&int16Samples[0]))[:len(int16Samples)*2]
+	// Convert int16 samples to bytes safely
+	if len(int16Samples) == 0 {
+		return false, fmt.Errorf("empty audio frame")
+	}
+	audioBytes := make([]byte, len(int16Samples)*2)
+	for i, sample := range int16Samples {
+		audioBytes[i*2] = byte(sample)
+		audioBytes[i*2+1] = byte(sample >> 8)
+	}
 
 	return webrtcvad.Process(v.detector, v.sampleRate, audioBytes, len(int16Samples))
 }
