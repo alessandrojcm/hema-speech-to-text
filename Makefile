@@ -7,15 +7,18 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
+GORUN=$(GOCMD) run
 BINARY_NAME=hema-replay-system
 BINARY_PATH=./bin/$(BINARY_NAME)
 MAIN_PATH=./cmd/replay-system
+GGML_CUDA=0
 
 # Build flags
 LDFLAGS=-ldflags "-s -w"
 BUILD_FLAGS=-trimpath $(LDFLAGS)
-C_INCLUDE_PATH=$(pwd)/whisper.cpp/src/whisper.cpp
-LIBRARY_PATH=$(pwd)/whisper.cpp/build_go/src/libwhisper.a
+C_INCLUDE_PATH=$(abspath ./whisper.cpp/include):$(abspath ./whisper.cpp/ggml/include)
+LIBRARY_PATH=$(abspath ./whisper.cpp/build_go/src):$(abspath ./whisper.cpp/build_go/ggml/src):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-metal):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-cpu):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-blas)
+GGML_METAL_PATH_RESOURCES := $(abspath ./whisper.cpp/ggml)
 
 # Colors for output
 GREEN=\033[0;32m
@@ -23,15 +26,15 @@ YELLOW=\033[1;33m
 RED=\033[0;31m
 NC=\033[0m # No Color
 
-.PHONY: all build clean test coverage deps fmt vet lint run install help
+.PHONY: all build clean test coverage deps fmt vet lint run install help run-debug run-debug-headless
 
 all: deps fmt vet test build
 
 # Build the application
-build:
+build: whisper
 	@echo "$(GREEN)Building $(BINARY_NAME)...$(NC)"
 	@mkdir -p bin
-	$(GOBUILD) $(BUILD_FLAGS) -o $(BINARY_PATH) $(MAIN_PATH)
+	@C_INCLUDE_PATH=${C_INCLUDE_PATH} GGML_METAL_PATH_RESOURCES=${GGML_METAL_PATH_RESOURCES} LIBRARY_PATH=${LIBRARY_PATH} $(GOBUILD) $(BUILD_FLAGS) -o $(BINARY_PATH) $(MAIN_PATH)
 	@echo "$(GREEN)Build complete: $(BINARY_PATH)$(NC)"
 
 # Clean build artifacts
@@ -93,8 +96,34 @@ lint:
 # Run the application
 run: build
 	@echo "$(GREEN)Running $(BINARY_NAME)...$(NC)"
-	$(BINARY_PATH)
+	$(BINARY_PATH) $(ARGS)
 
+# Run with debugger attached (starts immediately)
+run-debug: whisper
+	@echo "$(GREEN)Running $(BINARY_NAME) in debug mode...$(NC)"
+	@echo "$(ARGS)"
+	C_INCLUDE_PATH=$(C_INCLUDE_PATH) \
+	GGML_METAL_PATH_RESOURCES=$(GGML_METAL_PATH_RESOURCES) \
+	LIBRARY_PATH=$(LIBRARY_PATH) \
+	PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$$PKG_CONFIG_PATH" \
+	$(shell go env GOPATH)/bin/dlv debug $(MAIN_PATH) \
+	  --allow-non-terminal-interactive=true \
+	  --build-flags='-gcflags=all=-N -gcflags=all=-l' \
+	  -- $(ARGS)
+
+# Run in headless mode for remote debugging (waits for client connection)
+run-debug-headless: whisper
+	@echo "$(GREEN)Running $(BINARY_NAME) in headless debug mode...$(NC)"
+	@echo "$(GREEN)Connect with: dlv connect localhost:53412$(NC)"
+	@echo "$(ARGS)"
+	C_INCLUDE_PATH=$(C_INCLUDE_PATH) \
+	GGML_METAL_PATH_RESOURCES=$(GGML_METAL_PATH_RESOURCES) \
+	LIBRARY_PATH=$(LIBRARY_PATH) \
+	PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$$PKG_CONFIG_PATH" \
+	$(shell go env GOPATH)/bin/dlv debug $(MAIN_PATH) \
+	  --headless --listen=:53412 --api-version=2 --log \
+	  --build-flags='-gcflags=all=-N -gcflags=all=-l' \
+	  -- $(ARGS)
 # Run with config file
 run-config: build
 	@echo "$(GREEN)Running $(BINARY_NAME) with config...$(NC)"
@@ -104,6 +133,10 @@ run-config: build
 install: build
 	@echo "$(GREEN)Installing $(BINARY_NAME)...$(NC)"
 	@cp $(BINARY_PATH) $(GOPATH)/bin/$(BINARY_NAME)
+
+whisper:
+	@echo "$(GREEN)Bulding whisper$(NC)"
+	@GGML_CUDA=0 make -C ./whisper.cpp/bindings/go/ whisper
 
 # Development tools
 dev-setup:
@@ -162,6 +195,8 @@ help:
 	@echo "  vet          - Vet code"
 	@echo "  lint         - Run golint"
 	@echo "  run          - Build and run the application"
+	@echo "  run-debug    - Run with debugger attached (starts immediately)"
+	@echo "  run-debug-headless - Run in headless debug mode (waits for client)"
 	@echo "  run-config   - Build and run with config file"
 	@echo "  install      - Install the application"
 	@echo "  dev-setup    - Set up development tools"

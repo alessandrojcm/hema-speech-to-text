@@ -23,6 +23,7 @@ func NewGosamplerateResampler(quality int) (*GosamplerateResampler, error) {
 
 	// Create converter with single channel (we'll handle multi-channel separately)
 	// Use a larger buffer size to handle longer audio segments
+	// Start with a reasonable buffer size, we'll handle larger inputs by chunking
 	converter, err := gosamplerate.New(quality, 1, 65536)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gosamplerate converter: %w", err)
@@ -54,13 +55,37 @@ func (r *GosamplerateResampler) Resample(input []float32, inputRate, outputRate 
 	// Calculate conversion ratio
 	ratio := float64(outputRate) / float64(inputRate)
 
-	// Process the audio data
-	output, err := r.converter.Process(input, ratio, false)
-	if err != nil {
-		return nil, fmt.Errorf("resampling failed: %w", err)
+	// For large inputs, process in chunks to avoid buffer overflow
+	const maxChunkSize = 32768 // Conservative chunk size
+	if len(input) <= maxChunkSize {
+		// Process small inputs directly
+		output, err := r.converter.Process(input, ratio, false)
+		if err != nil {
+			return nil, fmt.Errorf("resampling failed: %w", err)
+		}
+		return output, nil
 	}
 
-	return output, nil
+	// Process large inputs in chunks
+	var result []float32
+	for i := 0; i < len(input); i += maxChunkSize {
+		end := i + maxChunkSize
+		if end > len(input) {
+			end = len(input)
+		}
+
+		chunk := input[i:end]
+		isLast := end == len(input)
+
+		output, err := r.converter.Process(chunk, ratio, isLast)
+		if err != nil {
+			return nil, fmt.Errorf("resampling chunk failed: %w", err)
+		}
+
+		result = append(result, output...)
+	}
+
+	return result, nil
 }
 
 // ResampleMultiChannel resamples multi-channel audio data

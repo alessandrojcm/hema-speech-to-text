@@ -23,38 +23,38 @@ scene:
 
 audio:
   device:
-    name: "BlackHole 2ch"           # Target audio device
-    id: -1                          # Auto-detect device ID
-    sample_rate: 44100              # Sample rate in Hz
-    channels: 2                     # Number of channels
-    bit_depth: 16                   # Bit depth
-    frames_per_buffer: 1024         # Buffer size in frames
-    fallback_devices:               # Fallback device names
+    name: "Aggregate Device" # Target audio device
+    id: -1 # Auto-detect device ID
+    sample_rate: 44100 # Sample rate in Hz
+    channels: 2 # Number of channels
+    bit_depth: 16 # Bit depth
+    frames_per_buffer: 1024 # Buffer size in frames
+    fallback_devices: # Fallback device names
       - "Built-in Microphone"
       - "Default"
-    monitor_interval: "5s"          # Device health check interval
-    
+    monitor_interval: "5s" # Device health check interval
+
   buffer:
-    duration: "60s"                 # Total buffer duration
-    segment_size: "1s"              # Individual segment size
-    overwrite_policy: "circular"    # Overwrite policy
-    preallocate_size: 0             # Memory preallocation (0 = auto)
-    
+    duration: "60s" # Total buffer duration
+    segment_size: "1s" # Individual segment size
+    overwrite_policy: "circular" # Overwrite policy
+    preallocate_size: 0 # Memory preallocation (0 = auto)
+
   processing:
-    enable_preprocessing: true      # Enable audio preprocessing
-    noise_reduction: true           # Enable noise reduction
-    normalization: true             # Enable normalization
-    highpass_filter: 80.0           # High-pass filter frequency (Hz)
-    lowpass_filter: 8000.0          # Low-pass filter frequency (Hz)
-    vad_threshold: 0.1              # Voice activity detection threshold
-    
+    enable_preprocessing: true # Enable audio preprocessing
+    noise_reduction: true # Enable noise reduction
+    normalization: true # Enable normalization
+    highpass_filter: 80.0 # High-pass filter frequency (Hz)
+    lowpass_filter: 8000.0 # Low-pass filter frequency (Hz)
+    vad_threshold: 0.1 # Voice activity detection threshold
+
   extraction:
-    default_duration: "10s"         # Default extraction duration
-    max_concurrent: 5               # Maximum concurrent extractions
-    output_format: "wav"            # Output format (wav, raw)
-    output_sample_rate: 16000       # Output sample rate (for whisper)
-    output_channels: 1              # Output channels (mono for whisper)
-    timestamp_precision: "10ms"     # Timestamp precision
+    default_duration: "10s" # Default extraction duration
+    max_concurrent: 5 # Maximum concurrent extractions
+    output_format: "wav" # Output format (wav, raw)
+    output_sample_rate: 16000 # Output sample rate (for whisper)
+    output_channels: 1 # Output channels (mono for whisper)
+    timestamp_precision: "10ms" # Timestamp precision
 
 speech:
   whisper:
@@ -67,7 +67,7 @@ speech:
     temperature: 0.0
     beam_size: 5
     word_timestamps: true
-  
+
   vocabulary:
     hema_vocab_path: "./config/hema_vocabulary.txt"
     boost_weights:
@@ -84,7 +84,7 @@ speech:
       - "nachreisen"
       - "zwerchhau"
       - "zornhau"
-  
+
   processing:
     target_sample_rate: 16000
     segment_duration: "10s"
@@ -92,15 +92,15 @@ speech:
     noise_reduction: true
     normalization: true
     vad_enabled: true
-  
+
   performance:
     max_concurrent: 3
     cache_size: 1000
     cache_ttl: "5m"
     timeout_duration: "30s"
-    memory_limit: 1073741824  # 1GB
+    memory_limit: 1073741824 # 1GB
     metal_optimization: true
 
 logging:
-  level: "info"
+  level: "debug"
   format: "json"

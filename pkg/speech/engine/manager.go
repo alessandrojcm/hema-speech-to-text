@@ -141,6 +141,41 @@ func (sm *SpeechManager) TranscribeAudio(ctx context.Context, audioSegment *audi
 		return nil, fmt.Errorf("speech manager not running")
 	}
 
+	// Validate audio segment before processing
+	if audioSegment == nil {
+		return nil, fmt.Errorf("audio segment is nil")
+	}
+
+	if len(audioSegment.Data) == 0 {
+		return nil, fmt.Errorf("audio segment data is empty")
+	}
+
+	// Check for minimum audio data (at least 100ms worth)
+	minDuration := 100 * time.Millisecond
+	if audioSegment.Duration < minDuration {
+		sm.logger.Debug().
+			Dur("duration", audioSegment.Duration).
+			Dur("min_duration", minDuration).
+			Int("data_length", len(audioSegment.Data)).
+			Msg("Audio segment too short for speech recognition, skipping")
+
+		// Return empty result instead of error for short segments
+		return &speechTypes.TranscriptionResult{
+			ID:          generateID(),
+			Text:        "",
+			Confidence:  0.0,
+			Language:    sm.config.Whisper.Language,
+			Duration:    time.Duration(0),
+			Segments:    []speechTypes.TranscriptionSegment{},
+			ProcessedAt: time.Now(),
+			Metadata: speechTypes.TranscriptionMetadata{
+				ModelUsed:      "skipped_insufficient_data",
+				ProcessingTime: time.Duration(0),
+				TokenCount:     0,
+			},
+		}, nil
+	}
+
 	// Create transcription request
 	request := speechTypes.TranscriptionRequest{
 		ID:                  generateID(),

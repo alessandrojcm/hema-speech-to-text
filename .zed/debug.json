@@ -1,0 +1,11 @@
+[
+  {
+    "adapter": "Delve",
+    "label": "Go Remote :53412",
+    "request": "attach",
+    "mode": "remote",
+    "tcp_connection": { "host": "127.0.0.1", "port": 53412 },
+    "dlvFlags": ["--headless", "--api-version=2"],
+    "stopOnEntry": false
+  }
+]

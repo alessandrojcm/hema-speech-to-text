@@ -44,6 +44,18 @@ func (ww *WhisperWrapper) Transcribe(samples []float32, params types.WhisperPara
 		return nil, fmt.Errorf("whisper model is nil")
 	}
 
+	// Validate input samples
+	if len(samples) == 0 {
+		return nil, fmt.Errorf("empty audio samples")
+	}
+
+	// Whisper requires a minimum amount of audio data to process
+	// At 16kHz (whisper's expected sample rate), we need at least 1600 samples for 100ms
+	minSamples := 1600 // 100ms at 16kHz
+	if len(samples) < minSamples {
+		return nil, fmt.Errorf("insufficient audio samples: %d (minimum: %d for meaningful transcription)", len(samples), minSamples)
+	}
+
 	startTime := time.Now()
 
 	// Create whisper context for this transcription

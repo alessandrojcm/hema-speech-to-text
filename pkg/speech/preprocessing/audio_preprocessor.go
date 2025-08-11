@@ -59,6 +59,11 @@ func (sap *SpeechAudioPreprocessor) PrepareAudioForSpeech(segment *audioTypes.Au
 		return nil, fmt.Errorf("empty audio segment")
 	}
 
+	// Validate minimum audio data requirements
+	if err := sap.ValidateAudioSegment(segment); err != nil {
+		return nil, fmt.Errorf("audio segment validation failed: %w", err)
+	}
+
 	startTime := time.Now()
 
 	// Step 1: Convert raw audio data to float32 samples
@@ -129,23 +134,47 @@ func (sap *SpeechAudioPreprocessor) PrepareAudioForSpeech(segment *audioTypes.Au
 func (sap *SpeechAudioPreprocessor) convertToFloat32Samples(segment *audioTypes.AudioSegment) ([]float32, error) {
 	data := segment.Data
 
+	// Validate input data
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty audio data")
+	}
+
 	// Determine sample format based on metadata or data length
 	var samples []float32
 
 	// Assume 16-bit PCM for now (most common format)
 	if len(data)%2 != 0 {
-		return nil, fmt.Errorf("invalid audio data length for 16-bit samples")
+		return nil, fmt.Errorf("invalid audio data length for 16-bit samples: %d bytes", len(data))
 	}
 
-	samples = make([]float32, len(data)/2)
+	expectedSamples := len(data) / 2
+	if expectedSamples == 0 {
+		return nil, fmt.Errorf("insufficient audio data: %d bytes", len(data))
+	}
 
-	for i := 0; i < len(samples); i++ {
-		if i*2+1 < len(data) {
-			// Convert 16-bit PCM to float32 (-1.0 to 1.0)
-			sample := int16(data[i*2]) | int16(data[i*2+1])<<8
-			samples[i] = float32(sample) / 32768.0
+	samples = make([]float32, expectedSamples)
+
+	for i := 0; i < expectedSamples; i++ {
+		byteIndex := i * 2
+		if byteIndex+1 >= len(data) {
+			sap.logger.Warn().
+				Int("sample_index", i).
+				Int("byte_index", byteIndex).
+				Int("data_length", len(data)).
+				Msg("Truncating audio conversion due to insufficient data")
+			break
 		}
+
+		// Convert 16-bit PCM to float32 (-1.0 to 1.0)
+		// Little-endian format: low byte first, high byte second
+		sample := int16(data[byteIndex]) | int16(data[byteIndex+1])<<8
+		samples[i] = float32(sample) / 32768.0
 	}
+
+	sap.logger.Debug().
+		Int("input_bytes", len(data)).
+		Int("output_samples", len(samples)).
+		Msg("Audio data conversion completed")
 
 	return samples, nil
 }
@@ -246,9 +275,20 @@ func (sap *SpeechAudioPreprocessor) ValidateAudioSegment(segment *audioTypes.Aud
 		return fmt.Errorf("audio segment data is empty")
 	}
 
-	if segment.Duration < sap.config.SegmentDuration/10 {
+	// Calculate minimum required samples for speech recognition
+	// Whisper typically needs at least 100ms of audio data
+	minDuration := 100 * time.Millisecond
+	minSamples := int(minDuration.Seconds() * float64(segment.Metadata.SampleRate) * float64(segment.Metadata.Channels))
+	minBytes := minSamples * 2 // 16-bit samples = 2 bytes per sample
+
+	if len(segment.Data) < minBytes {
+		return fmt.Errorf("insufficient audio data: %d bytes (minimum: %d bytes for %v of audio)",
+			len(segment.Data), minBytes, minDuration)
+	}
+
+	if segment.Duration < minDuration {
 		return fmt.Errorf("audio segment too short: %v (minimum: %v)",
-			segment.Duration, sap.config.SegmentDuration/10)
+			segment.Duration, minDuration)
 	}
 
 	if segment.Duration > sap.config.SegmentDuration*5 {
@@ -261,6 +301,20 @@ func (sap *SpeechAudioPreprocessor) ValidateAudioSegment(segment *audioTypes.Aud
 	if segment.Metadata.SampleRate < 8000 {
 		return fmt.Errorf("sample rate too low for speech recognition: %d Hz (minimum: 8000 Hz)",
 			segment.Metadata.SampleRate)
+	}
+
+	// Additional validation for expected sample count
+	expectedSamples := int(segment.Duration.Seconds() * float64(segment.Metadata.SampleRate) * float64(segment.Metadata.Channels))
+	expectedBytes := expectedSamples * 2
+
+	if len(segment.Data) < expectedBytes/2 { // Allow some tolerance
+		sap.logger.Warn().
+			Int("actual_bytes", len(segment.Data)).
+			Int("expected_bytes", expectedBytes).
+			Dur("duration", segment.Duration).
+			Int("sample_rate", segment.Metadata.SampleRate).
+			Int("channels", segment.Metadata.Channels).
+			Msg("Audio segment has less data than expected based on duration and sample rate")
 	}
 
 	return nil
