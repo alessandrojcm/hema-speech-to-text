@@ -188,22 +188,34 @@ func (ce *CaptureEngine) captureLoop(ctx context.Context) {
 		ce.mu.Lock()
 		ce.running = false
 		ce.mu.Unlock()
+		ce.logger.Info().Msg("Capture loop exited")
 	}()
 
 	frameSize := ce.config.FramesPerBuffer * ce.config.Channels
 	audioBuffer := make([]float32, frameSize)
 
+	ce.logger.Info().Int("frame_size", frameSize).Msg("Starting capture loop")
+	loopCount := 0
+
 	for {
 		select {
 		case <-ctx.Done():
+			ce.logger.Info().Msg("Capture loop stopped: context cancelled")
 			return
 		case <-ce.stopChan:
+			ce.logger.Info().Msg("Capture loop stopped: stop signal received")
 			return
 		default:
+			loopCount++
+			if loopCount%1000 == 0 { // Log every 1000 iterations to avoid spam
+				ce.logger.Debug().Int("loop_count", loopCount).Msg("Capture loop running")
+			}
+
 			startTime := time.Now()
 			timestamp := startTime
 
 			if err := ce.stream.Read(audioBuffer); err != nil {
+				ce.logger.Error().Err(err).Int("loop_count", loopCount).Msg("Stream read error")
 				ce.handleCaptureError(err)
 				continue
 			}

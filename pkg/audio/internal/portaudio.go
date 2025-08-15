@@ -134,6 +134,7 @@ func (pa *PortAudioWrapper) OpenStream(device *portaudio.DeviceInfo, config type
 
 	buffer := make([]float32, config.FramesPerBuffer*config.Channels)
 
+	// Create the stream with the input buffer for blocking I/O
 	stream, err := portaudio.OpenStream(parameters, buffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open stream: %w", err)
@@ -179,6 +180,26 @@ func (as *AudioStream) Read(buffer []float32) error {
 	}
 
 	copy(buffer, as.buffer)
+
+	// Enhanced audio analysis for debugging speech issues
+	var nonZeroCount int
+	var maxSample float32
+	var rmsSum float32
+
+	for _, sample := range as.buffer {
+		rmsSum += sample * sample
+		if sample != 0.0 {
+			nonZeroCount++
+			abs := sample
+			if abs < 0 {
+				abs = -abs
+			}
+			if abs > maxSample {
+				maxSample = abs
+			}
+		}
+	}
+
 	return nil
 }
 

@@ -165,8 +165,10 @@ func (a *Application) initializeSpeechOnly(ctx context.Context) error {
 		a.logger.Warn().Err(err).Msg("Audio manager not available - running in test mode without real audio")
 	} else {
 		a.audioMgr = audioMgr
-		// Start audio capture
-		if err := a.audioMgr.Start(ctx); err != nil {
+		// Start audio capture with long-lived context (not the timeout context)
+		// Audio capture needs to run for the lifetime of the application
+		longLivedCtx := context.Background()
+		if err := a.audioMgr.Start(longLivedCtx); err != nil {
 			a.logger.Warn().Err(err).Msg("Failed to start audio manager - continuing without audio")
 			a.audioMgr = nil
 		}
@@ -179,7 +181,7 @@ func (a *Application) initializeSpeechOnly(ctx context.Context) error {
 	}
 	a.speechMgr = speechMgr
 
-	// Start speech recognition
+	// Start speech recognition with timeout context (initialization only)
 	if err := a.speechMgr.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start speech manager: %w", err)
 	}

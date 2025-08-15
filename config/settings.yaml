@@ -23,10 +23,10 @@ scene:
 
 audio:
   device:
-    name: "Aggregate Device" # Target audio device
-    id: -1 # Auto-detect device ID
-    sample_rate: 48000 # Sample rate in Hz
-    channels: 2 # Number of channels
+    name: "MacBook Pro Microphone" # Target audio device
+    id: 1 # Use built-in microphone
+    sample_rate: 44100 # Sample rate in Hz (match built-in mic)
+    channels: 1 # Number of channels (mono for built-in mic)
     bit_depth: 16 # Bit depth
     frames_per_buffer: 1024 # Buffer size in frames
     fallback_devices: # Fallback device names
@@ -88,9 +88,9 @@ speech:
     target_sample_rate: 16000
     segment_duration: "10s"
     overlap_duration: "1s"
-    noise_reduction: false
-    normalization: false
-    vad_enabled: false
+    noise_reduction: true
+    normalization: true
+    vad_enabled: true
 
   performance:
     max_concurrent: 3
