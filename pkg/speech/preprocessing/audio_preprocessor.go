@@ -13,7 +13,7 @@ import (
 // SpeechAudioPreprocessor handles audio preprocessing specifically for speech recognition
 type SpeechAudioPreprocessor struct {
 	config            types.ProcessingConfig
-	enhancedProcessor *audioProcessing.EnhancedAudioProcessor
+	enhancedProcessor *audioProcessing.AudioProcessor
 	logger            zerolog.Logger
 }
 
@@ -23,7 +23,6 @@ func NewSpeechAudioPreprocessor(config types.ProcessingConfig, logger zerolog.Lo
 	audioConfig := audioTypes.ProcessingConfig{
 		EnablePreprocessing: true,
 		Normalization:       config.Normalization,
-		NoiseReduction:      config.NoiseReduction,
 		HighpassFilter:      80.0,   // Remove low-frequency noise for speech
 		LowpassFilter:       8000.0, // Remove high-frequency noise above speech range
 		VADThreshold:        0.01,
@@ -32,11 +31,10 @@ func NewSpeechAudioPreprocessor(config types.ProcessingConfig, logger zerolog.Lo
 		ResamplerType:       "gosamplerate",
 		ResamplerQuality:    4, // High quality resampling for speech
 		WAVExporterType:     "goaudio",
-		FFTType:             "gonum",
 	}
 
 	// Create enhanced audio processor with speech-optimized settings
-	enhancedProcessor, err := audioProcessing.NewEnhancedAudioProcessor(
+	enhancedProcessor, err := audioProcessing.NewAudioProcessor(
 		audioConfig,
 		config.TargetSampleRate,
 		1, // Mono for speech recognition
@@ -132,49 +130,19 @@ func (sap *SpeechAudioPreprocessor) PrepareAudioForSpeech(segment *audioTypes.Au
 
 // convertToFloat32Samples converts raw audio data to float32 samples
 func (sap *SpeechAudioPreprocessor) convertToFloat32Samples(segment *audioTypes.AudioSegment) ([]float32, error) {
-	data := segment.Data
-
-	// Validate input data
-	if len(data) == 0 {
+	// The segment.Data already contains float32 samples
+	// No conversion needed
+	if len(segment.Data) == 0 {
 		return nil, fmt.Errorf("empty audio data")
 	}
 
-	// Determine sample format based on metadata or data length
-	var samples []float32
-
-	// Assume 16-bit PCM for now (most common format)
-	if len(data)%2 != 0 {
-		return nil, fmt.Errorf("invalid audio data length for 16-bit samples: %d bytes", len(data))
-	}
-
-	expectedSamples := len(data) / 2
-	if expectedSamples == 0 {
-		return nil, fmt.Errorf("insufficient audio data: %d bytes", len(data))
-	}
-
-	samples = make([]float32, expectedSamples)
-
-	for i := 0; i < expectedSamples; i++ {
-		byteIndex := i * 2
-		if byteIndex+1 >= len(data) {
-			sap.logger.Warn().
-				Int("sample_index", i).
-				Int("byte_index", byteIndex).
-				Int("data_length", len(data)).
-				Msg("Truncating audio conversion due to insufficient data")
-			break
-		}
-
-		// Convert 16-bit PCM to float32 (-1.0 to 1.0)
-		// Little-endian format: low byte first, high byte second
-		sample := int16(data[byteIndex]) | int16(data[byteIndex+1])<<8
-		samples[i] = float32(sample) / 32768.0
-	}
+	// Simply return the float32 samples
+	samples := segment.Data
 
 	sap.logger.Debug().
-		Int("input_bytes", len(data)).
+		Int("input_samples", len(samples)).
 		Int("output_samples", len(samples)).
-		Msg("Audio data conversion completed")
+		Msg("Audio data conversion completed (no conversion needed - already float32)")
 
 	return samples, nil
 }

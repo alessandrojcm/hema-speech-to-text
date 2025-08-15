@@ -8,12 +8,14 @@ require (
 	github.com/dh1tw/gosamplerate v0.1.2
 	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20250807023745-4245c77b654c
 	github.com/go-audio/audio v1.0.0
+	github.com/go-audio/transforms v0.0.0-20180121090939-51830ccc35a5
 	github.com/go-audio/wav v1.1.0
 	github.com/gordonklaus/portaudio v0.0.0-20250206071425-98a94950218b
 	github.com/mitchellh/mapstructure v1.5.0
+	github.com/orcaman/writerseeker v0.0.0-20200621085525-1d3f536ff85e
 	github.com/rs/zerolog v1.32.0
 	github.com/spf13/viper v1.18.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	gonum.org/v1/gonum v0.16.0
 )
 
@@ -43,7 +45,7 @@ require (
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/net v0.23.0 // indirect
-	golang.org/x/sys v0.18.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

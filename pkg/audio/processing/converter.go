@@ -1,9 +1,16 @@
 package processing
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 
+	audio "github.com/go-audio/audio"
+	tranforms "github.com/go-audio/transforms"
+	wav "github.com/go-audio/wav"
+	"github.com/orcaman/writerseeker"
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
 )
 
@@ -12,15 +19,21 @@ type FormatConverter struct {
 	outputSampleRate int
 	inputChannels    int
 	outputChannels   int
+	resampler        *GosamplerateResampler
 }
 
-func NewFormatConverter(inputSampleRate, outputSampleRate, inputChannels, outputChannels int) *FormatConverter {
+func NewFormatConverter(inputSampleRate, outputSampleRate, inputChannels, outputChannels int) (*FormatConverter, error) {
+	resampler, error := NewGosamplerateResampler(0)
+	if error != nil {
+		return nil, error
+	}
 	return &FormatConverter{
 		inputSampleRate:  inputSampleRate,
 		outputSampleRate: outputSampleRate,
 		inputChannels:    inputChannels,
 		outputChannels:   outputChannels,
-	}
+		resampler:        resampler,
+	}, nil
 }
 
 func (fc *FormatConverter) Convert(input []float32) ([]float32, error) {
@@ -53,152 +66,94 @@ func (fc *FormatConverter) convertChannels(input []float32) ([]float32, error) {
 	if fc.inputChannels == fc.outputChannels {
 		return input, nil
 	}
-
-	inputFrames := len(input) / fc.inputChannels
-	output := make([]float32, inputFrames*fc.outputChannels)
-
 	if fc.inputChannels == 2 && fc.outputChannels == 1 {
-		for i := 0; i < inputFrames; i++ {
-			left := input[i*2]
-			right := input[i*2+1]
-			output[i] = (left + right) / 2.0
+		floatBuffer := &audio.Float32Buffer{Format: &audio.Format{
+			SampleRate:  fc.inputSampleRate,
+			NumChannels: fc.inputChannels,
+		}, Data: input}
+		output := tranforms.MonoDownmix(floatBuffer.AsFloatBuffer())
+		if output == nil {
+			return nil, errors.New("failed to convert channels")
 		}
-	} else if fc.inputChannels == 1 && fc.outputChannels == 2 {
-		for i := 0; i < inputFrames; i++ {
-			mono := input[i]
-			output[i*2] = mono
-			output[i*2+1] = mono
-		}
-	} else {
-		return nil, fmt.Errorf("unsupported channel conversion: %d -> %d", fc.inputChannels, fc.outputChannels)
+		return floatBuffer.AsFloat32Buffer().Data, nil
 	}
-
-	return output, nil
+	if fc.inputChannels == 1 && fc.outputChannels == 2 {
+		floatBuffer := &audio.Float32Buffer{Format: &audio.Format{
+			SampleRate:  fc.inputSampleRate,
+			NumChannels: fc.inputChannels,
+		}, Data: input}
+		output := tranforms.MonoToStereoF32(floatBuffer.AsFloat32Buffer())
+		if output == nil {
+			return nil, errors.New("failed to convert channels")
+		}
+		return floatBuffer.AsFloat32Buffer().Data, nil
+	}
+	return nil, errors.ErrUnsupported
 }
 
 func (fc *FormatConverter) resample(input []float32) ([]float32, error) {
-	if fc.inputSampleRate == fc.outputSampleRate {
-		return input, nil
+	output, err := fc.resampler.Resample(input, fc.inputSampleRate, fc.outputSampleRate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resample: %w", err)
 	}
-
-	ratio := float64(fc.outputSampleRate) / float64(fc.inputSampleRate)
-	inputFrames := len(input) / fc.outputChannels
-	outputFrames := int(float64(inputFrames) * ratio)
-	output := make([]float32, outputFrames*fc.outputChannels)
-
-	for i := 0; i < outputFrames; i++ {
-		srcIndex := float64(i) / ratio
-		srcIndexInt := int(srcIndex)
-		srcIndexFrac := srcIndex - float64(srcIndexInt)
-
-		if srcIndexInt >= inputFrames-1 {
-			srcIndexInt = inputFrames - 1
-			srcIndexFrac = 0.0
-		}
-
-		for ch := 0; ch < fc.outputChannels; ch++ {
-			sample1 := input[srcIndexInt*fc.outputChannels+ch]
-			sample2 := sample1
-			if srcIndexInt < inputFrames-1 {
-				sample2 = input[(srcIndexInt+1)*fc.outputChannels+ch]
-			}
-
-			interpolated := sample1 + float32(srcIndexFrac)*float32(sample2-sample1)
-			output[i*fc.outputChannels+ch] = interpolated
-		}
-	}
-
 	return output, nil
 }
 
 func ConvertToWAV(segment *types.AudioSegment, outputSampleRate, outputChannels int) ([]byte, error) {
-	converter := NewFormatConverter(
+	converter, error := NewFormatConverter(
 		segment.Metadata.SampleRate,
 		outputSampleRate,
 		segment.Metadata.Channels,
 		outputChannels,
 	)
+	if error != nil {
+		return nil, fmt.Errorf("failed to create format converter: %w", error)
+	}
 
 	convertedData, err := converter.Convert(segment.Data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert audio format: %w", err)
 	}
-
-	return createWAVHeader(convertedData, outputSampleRate, outputChannels), nil
-}
-
-func createWAVHeader(data []float32, sampleRate, channels int) []byte {
-	const bitsPerSample = 16
-	byteRate := sampleRate * channels * bitsPerSample / 8
-	blockAlign := channels * bitsPerSample / 8
-	dataSize := len(data) * 2
-	fileSize := 36 + dataSize
-
-	header := make([]byte, 44)
-
-	copy(header[0:4], "RIFF")
-	writeUint32(header[4:8], uint32(fileSize))
-	copy(header[8:12], "WAVE")
-	copy(header[12:16], "fmt ")
-	writeUint32(header[16:20], 16)
-	writeUint16(header[20:22], 1)
-	writeUint16(header[22:24], uint16(channels))
-	writeUint32(header[24:28], uint32(sampleRate))
-	writeUint32(header[28:32], uint32(byteRate))
-	writeUint16(header[32:34], uint16(blockAlign))
-	writeUint16(header[34:36], uint16(bitsPerSample))
-	copy(header[36:40], "data")
-	writeUint32(header[40:44], uint32(dataSize))
-
-	audioData := make([]byte, dataSize)
-	for i, sample := range data {
-		value := int16(sample * 32767.0)
-		if value > 32767 {
-			value = 32767
-		} else if value < -32768 {
-			value = -32768
+	// Convert float32 samples to int16 for WAV encoding
+	intSamples := make([]int, len(convertedData))
+	for i, sample := range convertedData {
+		// Clamp to [-1, 1] range
+		if sample > 1.0 {
+			sample = 1.0
+		} else if sample < -1.0 {
+			sample = -1.0
 		}
-		audioData[i*2] = byte(value)
-		audioData[i*2+1] = byte(value >> 8)
+		// Convert to 16-bit integer
+		intSamples[i] = int(sample * 32767.0)
 	}
 
-	return append(header, audioData...)
-}
+	seeker := &writerseeker.WriterSeeker{}
+	encoder := wav.NewEncoder(seeker, outputSampleRate, 16, outputChannels, 1)
 
-func writeUint32(b []byte, v uint32) {
-	b[0] = byte(v)
-	b[1] = byte(v >> 8)
-	b[2] = byte(v >> 16)
-	b[3] = byte(v >> 24)
-}
-
-func writeUint16(b []byte, v uint16) {
-	b[0] = byte(v)
-	b[1] = byte(v >> 8)
-}
-
-func NormalizeAudio(samples []float32) {
-	if len(samples) == 0 {
-		return
+	intBuffer := &audio.IntBuffer{
+		Format: &audio.Format{
+			SampleRate:  outputSampleRate,
+			NumChannels: outputChannels,
+		},
+		Data:           intSamples,
+		SourceBitDepth: 16,
 	}
 
-	var maxAbs float32
-	for _, sample := range samples {
-		abs := sample
-		if abs < 0 {
-			abs = -abs
-		}
-		if abs > maxAbs {
-			maxAbs = abs
-		}
+	if err := encoder.Write(intBuffer); err != nil {
+		return nil, fmt.Errorf("failed to write WAV data: %w", err)
 	}
 
-	if maxAbs > 0 && maxAbs != 1.0 {
-		scale := 1.0 / maxAbs
-		for i := range samples {
-			samples[i] *= scale
-		}
+	if err := encoder.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close WAV encoder: %w", err)
 	}
+
+	buf := bytes.NewBuffer([]byte{})
+	_, err = io.Copy(buf, seeker.Reader())
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy data to buffer: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 func ApplyHighpassFilter(samples []float32, cutoffFreq float64, sampleRate int) {

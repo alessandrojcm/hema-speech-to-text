@@ -25,7 +25,7 @@ audio:
   device:
     name: "Aggregate Device" # Target audio device
     id: -1 # Auto-detect device ID
-    sample_rate: 44100 # Sample rate in Hz
+    sample_rate: 48000 # Sample rate in Hz
     channels: 2 # Number of channels
     bit_depth: 16 # Bit depth
     frames_per_buffer: 1024 # Buffer size in frames
@@ -42,7 +42,6 @@ audio:
 
   processing:
     enable_preprocessing: true # Enable audio preprocessing
-    noise_reduction: true # Enable noise reduction
     normalization: true # Enable normalization
     highpass_filter: 80.0 # High-pass filter frequency (Hz)
     lowpass_filter: 8000.0 # Low-pass filter frequency (Hz)
@@ -89,9 +88,9 @@ speech:
     target_sample_rate: 16000
     segment_duration: "10s"
     overlap_duration: "1s"
-    noise_reduction: true
-    normalization: true
-    vad_enabled: true
+    noise_reduction: false
+    normalization: false
+    vad_enabled: false
 
   performance:
     max_concurrent: 3

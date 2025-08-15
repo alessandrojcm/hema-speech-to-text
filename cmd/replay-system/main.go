@@ -41,18 +41,20 @@ func main() {
 	var configPath string
 	var speechOnly bool
 	var audioFile string
+	var listDevices bool
 	flag.StringVar(&configPath, "config", "", "Path to configuration file")
 	flag.BoolVar(&speechOnly, "speech-only", false, "Run only speech recognition system (for testing)")
 	flag.StringVar(&audioFile, "audio-file", "", "Process a single audio file and exit (for testing)")
+	flag.BoolVar(&listDevices, "list-devices", false, "List available audio devices")
 	flag.Parse()
 
-	if err := run(configPath, speechOnly, audioFile); err != nil {
+	if err := run(configPath, speechOnly, audioFile, listDevices); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath string, speechOnly bool, audioFile string) error {
+func run(configPath string, speechOnly bool, audioFile string, listDevices bool) error {
 	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -68,6 +70,25 @@ func run(configPath string, speechOnly bool, audioFile string) error {
 	log, err := logger.New(loggerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+
+	if listDevices {
+		manager, err := audio.NewAudioManager(cfg.Audio, log.Logger)
+		if err != nil {
+			return fmt.Errorf("failed to initialize audio manager: %w", err)
+		}
+		err = manager.Start(context.Background())
+		if err != nil {
+			return fmt.Errorf("failed to start audio manager: %w", err)
+		}
+		devices, err := manager.ListDevices()
+		if err != nil {
+			return fmt.Errorf("failed to list audio devices: %w", err)
+		}
+		for _, device := range devices {
+			log.Info().Msgf("Device ID: %d, Name: %s", device.ID, device.Name)
+		}
+		return nil
 	}
 
 	// Create application

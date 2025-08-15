@@ -63,8 +63,8 @@ func NewQualityMeter(sampleRate, channels int) *QualityMeter {
 		rmsHistory:   make([]float64, 0, 10),
 		peakHistory:  make([]float64, 0, 10),
 		snrHistory:   make([]float64, 0, 10),
-		fftProcessor: NewGonumFFTProcessor(),
-		windowFunc:   NewGonumWindowFunction(),
+		fftProcessor: NewFFT(sampleRate),
+		windowFunc:   NewFFTWindowFunction(),
 		logger:       zerolog.Nop(), // Default no-op logger
 	}
 }

@@ -57,7 +57,7 @@ func BenchmarkResamplerComparison(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			processor, err := processing.NewEnhancedAudioProcessor(bm.config, 44100, 2, logger)
+			processor, err := processing.NewAudioProcessor(bm.config, 44100, 2, logger)
 			if err != nil {
 				b.Fatalf("Failed to create processor: %v", err)
 			}
@@ -112,7 +112,7 @@ func BenchmarkVADComparison(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			processor, err := processing.NewEnhancedAudioProcessor(bm.config, 16000, 1, logger)
+			processor, err := processing.NewAudioProcessor(bm.config, 16000, 1, logger)
 			if err != nil {
 				b.Fatalf("Failed to create processor: %v", err)
 			}
@@ -140,7 +140,7 @@ func BenchmarkFFTComparison(b *testing.B) {
 
 		b.Run(fmt.Sprintf("Gonum_FFT_%d", size), func(b *testing.B) {
 			config := types.ProcessingConfig{FFTType: "gonum"}
-			processor, err := processing.NewEnhancedAudioProcessor(config, 16000, 1, logger)
+			processor, err := processing.NewAudioProcessor(config, 16000, 1, logger)
 			if err != nil {
 				b.Fatalf("Failed to create processor: %v", err)
 			}
@@ -227,7 +227,7 @@ func BenchmarkAudioProcessingPipeline(b *testing.B) {
 
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
-			processor, err := processing.NewEnhancedAudioProcessor(bm.config, 44100, 2, logger)
+			processor, err := processing.NewAudioProcessor(bm.config, 44100, 2, logger)
 			if err != nil {
 				b.Fatalf("Failed to create processor: %v", err)
 			}
@@ -334,7 +334,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			FFTType:             "gonum",
 		}
 
-		processor, err := processing.NewEnhancedAudioProcessor(config, 44100, 2, logger)
+		processor, err := processing.NewAudioProcessor(config, 44100, 2, logger)
 		if err != nil {
 			b.Fatalf("Failed to create processor: %v", err)
 		}
@@ -365,7 +365,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			VADMode:             3,
 		}
 
-		processor, err := processing.NewEnhancedAudioProcessor(config, 44100, 2, logger)
+		processor, err := processing.NewAudioProcessor(config, 44100, 2, logger)
 		if err != nil {
 			b.Fatalf("Failed to create processor: %v", err)
 		}
@@ -471,7 +471,7 @@ func BenchmarkLatencyMeasurement(b *testing.B) {
 				VADMode:             1, // Less aggressive for real-time
 			}
 
-			processor, err := processing.NewEnhancedAudioProcessor(config, 16000, 1, logger)
+			processor, err := processing.NewAudioProcessor(config, 16000, 1, logger)
 			if err != nil {
 				b.Fatalf("Failed to create processor: %v", err)
 			}

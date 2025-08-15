@@ -87,9 +87,12 @@ func (cm *CaptureMetrics) GetStats() types.CaptureStats {
 	}
 }
 
-func NewCaptureEngine(config types.DeviceConfig, processingConfig types.ProcessingConfig, ringBuffer *buffer.RingBuffer, logger zerolog.Logger) *CaptureEngine {
+func NewCaptureEngine(config types.DeviceConfig, processingConfig types.ProcessingConfig, ringBuffer *buffer.RingBuffer, logger zerolog.Logger) (*CaptureEngine, error) {
 	deviceManager := NewDeviceManager(config, logger)
-	processor := processing.NewAudioProcessor(processingConfig, config.SampleRate, config.Channels, logger)
+	processor, err := processing.NewAudioProcessor(processingConfig, config.SampleRate, config.Channels, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create audio processor: %w", err)
+	}
 
 	return &CaptureEngine{
 		config:        config,
@@ -101,7 +104,7 @@ func NewCaptureEngine(config types.DeviceConfig, processingConfig types.Processi
 		statsChan:     make(chan types.CaptureStats, 1),
 		logger:        logger.With().Str("component", "capture_engine").Logger(),
 		metrics:       NewCaptureMetrics(),
-	}
+	}, nil
 }
 func (ce *CaptureEngine) Start(ctx context.Context) error {
 	ce.mu.Lock()

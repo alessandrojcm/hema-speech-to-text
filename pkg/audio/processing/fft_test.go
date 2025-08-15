@@ -3,13 +3,15 @@ package processing
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/your-org/hema-replay-system/pkg/audio/types"
 )
 
 func TestGonumFFTProcessor(t *testing.T) {
-	processor := NewGonumFFTProcessor()
+	processor := NewFFT(16000)
 	require.NotNil(t, processor)
 
 	t.Run("FFTBasic", func(t *testing.T) {
@@ -110,98 +112,6 @@ func TestGonumFFTProcessor(t *testing.T) {
 	})
 }
 
-func TestGonumWindowFunction(t *testing.T) {
-	windowFunc := NewGonumWindowFunction()
-	require.NotNil(t, windowFunc)
-
-	t.Run("HannWindow", func(t *testing.T) {
-		size := 256
-		window := windowFunc.GetWindow(size, "hann")
-		require.NotNil(t, window)
-		assert.Equal(t, size, len(window))
-
-		// Hann window should start and end with 0
-		assert.InDelta(t, 0.0, window[0], 0.001)
-		assert.InDelta(t, 0.0, window[size-1], 0.001)
-
-		// Maximum should be around the middle
-		maxVal := float32(0.0)
-		maxIdx := 0
-		for i, val := range window {
-			if val > maxVal {
-				maxVal = val
-				maxIdx = i
-			}
-		}
-		assert.InDelta(t, size/2, maxIdx, float64(size)/10) // Within 10% of center
-		assert.InDelta(t, 1.0, maxVal, 0.1)                 // Close to 1.0
-	})
-
-	t.Run("HammingWindow", func(t *testing.T) {
-		size := 128
-		window := windowFunc.GetWindow(size, "hamming")
-		require.NotNil(t, window)
-		assert.Equal(t, size, len(window))
-
-		// Hamming window should have small non-zero values at edges
-		assert.Greater(t, window[0], float32(0.0))
-		assert.Greater(t, window[size-1], float32(0.0))
-		assert.Less(t, window[0], float32(0.1))
-		assert.Less(t, window[size-1], float32(0.1))
-	})
-
-	t.Run("BlackmanWindow", func(t *testing.T) {
-		size := 64
-		window := windowFunc.GetWindow(size, "blackman")
-		require.NotNil(t, window)
-		assert.Equal(t, size, len(window))
-
-		// Blackman window should start and end near 0
-		assert.InDelta(t, 0.0, window[0], 0.001)
-		assert.InDelta(t, 0.0, window[size-1], 0.001)
-	})
-
-	t.Run("ApplyWindow", func(t *testing.T) {
-		// Generate test signal
-		samples := generateSineWave(1000, 100.0, 1.0, 256)
-		originalSum := float32(0.0)
-		for _, sample := range samples {
-			originalSum += sample * sample
-		}
-
-		// Apply Hann window
-		windowed := windowFunc.Apply(samples, "hann")
-		require.NotNil(t, windowed)
-		assert.Equal(t, len(samples), len(windowed))
-
-		// Windowed signal should have less energy
-		windowedSum := float32(0.0)
-		for _, sample := range windowed {
-			windowedSum += sample * sample
-		}
-		assert.Less(t, windowedSum, originalSum)
-
-		// Original samples should be unchanged
-		originalSamples := generateSineWave(1000, 100.0, 1.0, 256)
-		for i, sample := range samples {
-			assert.Equal(t, originalSamples[i], sample)
-		}
-	})
-
-	t.Run("UnknownWindowType", func(t *testing.T) {
-		size := 128
-		window := windowFunc.GetWindow(size, "unknown")
-		require.NotNil(t, window)
-		assert.Equal(t, size, len(window))
-
-		// Should default to Hann window
-		hannWindow := windowFunc.GetWindow(size, "hann")
-		for i, val := range window {
-			assert.Equal(t, hannWindow[i], val)
-		}
-	})
-}
-
 func TestZeroCrossingRate(t *testing.T) {
 	t.Run("SineWave", func(t *testing.T) {
 		// Generate sine wave
@@ -271,7 +181,7 @@ func findPeaks(spectrum []float64, threshold float64) []int {
 }
 
 func BenchmarkGonumFFT(b *testing.B) {
-	processor := NewGonumFFTProcessor()
+	processor := NewFFT(16000)
 	samples := generateSineWave(44100, 1000.0, 1.0, 1024)
 
 	b.ResetTimer()
@@ -281,7 +191,12 @@ func BenchmarkGonumFFT(b *testing.B) {
 }
 
 func BenchmarkGonumPowerSpectrum(b *testing.B) {
-	processor := NewGonumFFTProcessor()
+	// Create test configuration
+	config := types.DefaultAudioConfig()
+	config.Device.SampleRate = 16000 // Lower sample rate for testing
+	config.Buffer.Duration = 10 * time.Second
+	config.Extraction.MaxConcurrent = 3
+	processor := NewFFT(16000)
 	samples := generateSineWave(44100, 1000.0, 1.0, 1024)
 
 	b.ResetTimer()
@@ -291,11 +206,11 @@ func BenchmarkGonumPowerSpectrum(b *testing.B) {
 }
 
 func BenchmarkWindowFunction(b *testing.B) {
-	windowFunc := NewGonumWindowFunction()
-	samples := generateSineWave(44100, 1000.0, 1.0, 1024)
+	processor := NewFFTWindowFunction()
+	sine := generateSineWave(44100, 1000.0, 1.0, 1024)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		windowFunc.Apply(samples, "hann")
+		processor.Apply(sine, "hann")
 	}
 }

@@ -247,7 +247,7 @@ func TestAudioProcessingPipeline(t *testing.T) {
 
 func testProcessingConfiguration(t *testing.T, config types.ProcessingConfig, logger zerolog.Logger) {
 	// Create enhanced audio processor
-	processor, err := processing.NewEnhancedAudioProcessor(config, 16000, 1, logger)
+	processor, err := processing.NewAudioProcessor(config, 16000, 1, logger)
 	require.NoError(t, err, "Failed to create enhanced audio processor")
 	require.NotNil(t, processor, "Processor should not be nil")
 	defer processor.Close()

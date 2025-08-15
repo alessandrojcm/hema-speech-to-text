@@ -116,6 +116,7 @@ func (dm *DeviceManager) GetHealth() types.DeviceHealth {
 func (dm *DeviceManager) GetDevices() []types.DeviceInfo {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
+	dm.refreshDevices()
 	return dm.devices
 }
 

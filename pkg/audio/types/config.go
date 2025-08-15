@@ -29,7 +29,6 @@ type BufferConfig struct {
 
 type ProcessingConfig struct {
 	EnablePreprocessing bool    `mapstructure:"enable_preprocessing"`
-	NoiseReduction      bool    `mapstructure:"noise_reduction"`
 	Normalization       bool    `mapstructure:"normalization"`
 	HighpassFilter      float64 `mapstructure:"highpass_filter"`
 	LowpassFilter       float64 `mapstructure:"lowpass_filter"`
@@ -39,7 +38,6 @@ type ProcessingConfig struct {
 	ResamplerType   string `mapstructure:"resampler_type"`    // "gosamplerate", "custom"
 	VADType         string `mapstructure:"vad_type"`          // "webrtc", "threshold"
 	WAVExporterType string `mapstructure:"wav_exporter_type"` // "goaudio", "custom"
-	FFTType         string `mapstructure:"fft_type"`          // "gonum", "custom"
 
 	// Library-specific settings
 	ResamplerQuality int `mapstructure:"resampler_quality"` // gosamplerate quality level (0-4)
@@ -74,18 +72,15 @@ func DefaultAudioConfig() AudioConfig {
 			PreallocateSize: 0,
 		},
 		Processing: ProcessingConfig{
-			EnablePreprocessing: true,
-			NoiseReduction:      true,
-			Normalization:       true,
-			HighpassFilter:      80.0,
-			LowpassFilter:       8000.0,
-			VADThreshold:        0.1,
+			EnablePreprocessing: true, Normalization: true,
+			HighpassFilter: 80.0,
+			LowpassFilter:  8000.0,
+			VADThreshold:   0.1,
 
 			// Library selection defaults
 			ResamplerType:   "gosamplerate",
 			VADType:         "webrtc",
 			WAVExporterType: "goaudio",
-			FFTType:         "gonum",
 
 			// Library-specific settings
 			ResamplerQuality: 0, // Best quality

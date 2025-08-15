@@ -139,7 +139,7 @@ type AudioManager struct {
 	config        types.AudioConfig
 	captureEngine *capture.CaptureEngine
 	ringBuffer    *buffer.RingBuffer
-	processor     *processing.EnhancedAudioProcessor
+	processor     *processing.AudioProcessor
 	deviceManager *capture.DeviceManager
 	extractor     *AudioExtractor
 
@@ -190,7 +190,7 @@ func NewAudioManager(config types.AudioConfig, logger zerolog.Logger) (*AudioMan
 		config.Device.BitDepth,
 	)
 
-	processor, err := processing.NewEnhancedAudioProcessor(
+	processor, err := processing.NewAudioProcessor(
 		config.Processing,
 		config.Device.SampleRate,
 		config.Device.Channels,
@@ -200,12 +200,15 @@ func NewAudioManager(config types.AudioConfig, logger zerolog.Logger) (*AudioMan
 		return nil, fmt.Errorf("failed to create enhanced audio processor: %w", err)
 	}
 
-	captureEngine := capture.NewCaptureEngine(
+	captureEngine, err := capture.NewCaptureEngine(
 		config.Device,
 		config.Processing,
 		ringBuffer,
 		logger,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create capture engine: %w", err)
+	}
 
 	deviceManager := capture.NewDeviceManager(config.Device, logger)
 
@@ -249,6 +252,16 @@ func (am *AudioManager) Start(ctx context.Context) error {
 	am.logger.Info().Msg("Audio manager started")
 
 	return nil
+}
+
+func (am *AudioManager) ListDevices() ([]types.DeviceInfo, error) {
+	if !am.running {
+		return nil, types.ErrNotRunning
+	}
+
+	devices := am.deviceManager.GetDevices()
+
+	return devices, nil
 }
 
 func (am *AudioManager) Stop() error {
@@ -418,17 +431,9 @@ func (ae *AudioExtractor) Extract(ctx context.Context, req types.ExtractionReque
 		return nil, fmt.Errorf("failed to extract audio: %w", err)
 	}
 
-	if req.Format == "wav" {
-		wavData, err := processing.ConvertToWAV(segment, ae.config.OutputSampleRate, ae.config.OutputChannels)
-		if err != nil {
-			ae.logger.Warn().Err(err).Msg("Failed to convert to WAV format")
-		} else {
-			segment.Data = make([]float32, len(wavData)/4)
-			for i := 0; i < len(wavData)/4; i++ {
-				segment.Data[i] = float32(wavData[i*4]) / 32768.0
-			}
-		}
-	}
+	// Note: If format is "wav", the actual WAV conversion should happen
+	// at the point of export/use, not here. The segment should always
+	// contain raw float32 samples for further processing.
 
 	return segment, nil
 }
@@ -447,8 +452,7 @@ func (am *AudioManager) GetPerformanceStats() map[string]interface{} {
 
 	totalExtractions := atomic.LoadInt64(&am.totalExtractions)
 	failedExtractions := atomic.LoadInt64(&am.failedExtractions)
-
-	var successRate float64
+	successRate := float64(0)
 	if totalExtractions > 0 {
 		successRate = float64(totalExtractions-failedExtractions) / float64(totalExtractions) * 100
 	}
@@ -457,10 +461,15 @@ func (am *AudioManager) GetPerformanceStats() map[string]interface{} {
 		"total_extractions":    totalExtractions,
 		"failed_extractions":   failedExtractions,
 		"success_rate_percent": successRate,
-		"avg_extraction_time":  am.avgExtractionTime,
+		"avg_extraction_ms":    am.avgExtractionTime.Milliseconds(),
 		"is_running":           am.running,
 		"overall_health":       am.health.OverallStatus.String(),
 	}
+}
+
+// ExportSegmentToWAV exports an audio segment to WAV format
+func (am *AudioManager) ExportSegmentToWAV(segment *types.AudioSegment) ([]byte, error) {
+	return processing.ConvertToWAV(segment, am.config.Extraction.OutputSampleRate, am.config.Extraction.OutputChannels)
 }
 
 // ExtractAudioConcurrent extracts multiple audio segments concurrently

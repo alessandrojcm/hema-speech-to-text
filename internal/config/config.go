@@ -142,7 +142,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("audio.buffer.preallocate_size", 0)
 
 	v.SetDefault("audio.processing.enable_preprocessing", true)
-	v.SetDefault("audio.processing.noise_reduction", true)
 	v.SetDefault("audio.processing.normalization", true)
 	v.SetDefault("audio.processing.highpass_filter", 80.0)
 	v.SetDefault("audio.processing.lowpass_filter", 8000.0)
@@ -182,7 +181,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("speech.processing.target_sample_rate", 16000)
 	v.SetDefault("speech.processing.segment_duration", "10s")
 	v.SetDefault("speech.processing.overlap_duration", "1s")
-	v.SetDefault("speech.processing.noise_reduction", true)
 	v.SetDefault("speech.processing.normalization", true)
 	v.SetDefault("speech.processing.vad_enabled", true)
 

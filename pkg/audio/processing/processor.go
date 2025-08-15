@@ -6,10 +6,54 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
+
+	audio "github.com/go-audio/audio"
+	transforms "github.com/go-audio/transforms"
 )
 
-// EnhancedAudioProcessor uses library implementations for audio processing
-type EnhancedAudioProcessor struct {
+type AudioFilter interface {
+	Apply(samples []float32) error
+}
+
+type Normalizer struct {
+	targetLevel float32
+}
+
+type HighpassFilter struct {
+	cutoffFreq float64
+	sampleRate int
+	prevInput  float32
+	prevOutput float32
+}
+
+type LowpassFilter struct {
+	cutoffFreq float64
+	sampleRate int
+	prevOutput float32
+}
+
+func (hf *HighpassFilter) Apply(samples []float32) error {
+	ApplyHighpassFilter(samples, hf.cutoffFreq, hf.sampleRate)
+	return nil
+}
+
+func (lf *LowpassFilter) Apply(samples []float32) error {
+	ApplyLowpassFilter(samples, lf.cutoffFreq, lf.sampleRate)
+	return nil
+}
+
+func (n *Normalizer) Normalize(samples []float32, sampleRate, channels int) error {
+	floatBuffer := &audio.Float32Buffer{Format: &audio.Format{
+		SampleRate:  sampleRate,
+		NumChannels: channels,
+	}, Data: samples}
+
+	transforms.NormalizeMax(floatBuffer.AsFloatBuffer())
+	return nil
+}
+
+// AudioProcessor uses library implementations for audio processing
+type AudioProcessor struct {
 	config     types.ProcessingConfig
 	sampleRate int
 	channels   int
@@ -23,7 +67,6 @@ type EnhancedAudioProcessor struct {
 
 	// Keep existing components that work
 	normalizer   *Normalizer
-	noiseReducer *NoiseReducer
 	filters      []AudioFilter
 	qualityMeter *QualityMeter
 
@@ -33,9 +76,9 @@ type EnhancedAudioProcessor struct {
 	logger zerolog.Logger
 }
 
-// NewEnhancedAudioProcessor creates a new enhanced audio processor with library implementations
-func NewEnhancedAudioProcessor(config types.ProcessingConfig, sampleRate, channels int, logger zerolog.Logger) (*EnhancedAudioProcessor, error) {
-	ap := &EnhancedAudioProcessor{
+// NewAudioProcessor creates a new enhanced audio processor with library implementations
+func NewAudioProcessor(config types.ProcessingConfig, sampleRate, channels int, logger zerolog.Logger) (*AudioProcessor, error) {
+	ap := &AudioProcessor{
 		config:     config,
 		sampleRate: sampleRate,
 		channels:   channels,
@@ -50,7 +93,6 @@ func NewEnhancedAudioProcessor(config types.ProcessingConfig, sampleRate, channe
 	// Initialize existing components
 	if config.EnablePreprocessing {
 		ap.normalizer = &Normalizer{targetLevel: 0.8}
-		ap.noiseReducer = &NoiseReducer{reduction: 0.5}
 		ap.qualityMeter = NewQualityMeter(sampleRate, channels)
 
 		if config.HighpassFilter > 0 {
@@ -72,7 +114,7 @@ func NewEnhancedAudioProcessor(config types.ProcessingConfig, sampleRate, channe
 }
 
 // initializeLibraryComponents initializes the library-based components based on configuration
-func (ap *EnhancedAudioProcessor) initializeLibraryComponents() error {
+func (ap *AudioProcessor) initializeLibraryComponents() error {
 	// Initialize resampler
 	if err := ap.createResampler(); err != nil {
 		return fmt.Errorf("failed to create resampler: %w", err)
@@ -87,16 +129,16 @@ func (ap *EnhancedAudioProcessor) initializeLibraryComponents() error {
 	ap.wavExporter = ap.createWAVExporter()
 
 	// Initialize FFT processor
-	ap.fftProcessor = ap.createFFTProcessor()
+	ap.fftProcessor = NewFFT(ap.sampleRate)
 
 	// Initialize window function
-	ap.windowFunc = NewGonumWindowFunction()
+	ap.windowFunc = NewFFTWindowFunction()
 
 	return nil
 }
 
 // createResampler creates the appropriate resampler based on configuration
-func (ap *EnhancedAudioProcessor) createResampler() error {
+func (ap *AudioProcessor) createResampler() error {
 	switch ap.config.ResamplerType {
 	case "gosamplerate":
 		resampler, err := NewGosamplerateResampler(ap.config.ResamplerQuality)
@@ -122,7 +164,7 @@ func (ap *EnhancedAudioProcessor) createResampler() error {
 }
 
 // createVADDetector creates the appropriate VAD detector based on configuration
-func (ap *EnhancedAudioProcessor) createVADDetector() error {
+func (ap *AudioProcessor) createVADDetector() error {
 	switch ap.config.VADType {
 	case "webrtc":
 		vadDetector, err := NewWebRTCVAD(ap.sampleRate, ap.config.VADMode)
@@ -148,7 +190,7 @@ func (ap *EnhancedAudioProcessor) createVADDetector() error {
 }
 
 // createWAVExporter creates the appropriate WAV exporter based on configuration
-func (ap *EnhancedAudioProcessor) createWAVExporter() WAVExporter {
+func (ap *AudioProcessor) createWAVExporter() WAVExporter {
 	switch ap.config.WAVExporterType {
 	case "goaudio":
 		return NewGoAudioWAVExporter()
@@ -162,23 +204,8 @@ func (ap *EnhancedAudioProcessor) createWAVExporter() WAVExporter {
 	}
 }
 
-// createFFTProcessor creates the appropriate FFT processor based on configuration
-func (ap *EnhancedAudioProcessor) createFFTProcessor() FFTProcessor {
-	switch ap.config.FFTType {
-	case "gonum":
-		return NewGonumFFTProcessor()
-	case "custom":
-		// Return custom implementation (would need to be implemented)
-		ap.logger.Warn().Msg("Custom FFT processor not implemented, using Gonum")
-		return NewGonumFFTProcessor()
-	default:
-		ap.logger.Warn().Str("type", ap.config.FFTType).Msg("Unknown FFT type, using Gonum")
-		return NewGonumFFTProcessor()
-	}
-}
-
 // Process applies enhanced audio processing to input samples
-func (ap *EnhancedAudioProcessor) Process(samples []float32, timestamp time.Time) ([]float32, error) {
+func (ap *AudioProcessor) Process(samples []float32, timestamp time.Time) ([]float32, error) {
 	if len(samples) == 0 {
 		return samples, nil
 	}
@@ -200,17 +227,9 @@ func (ap *EnhancedAudioProcessor) Process(samples []float32, timestamp time.Time
 				ap.logger.Warn().Err(err).Msg("Filter application failed")
 			}
 		}
-
-		// Apply noise reduction
-		if ap.config.NoiseReduction && ap.noiseReducer != nil {
-			if err := ap.noiseReducer.Reduce(processed); err != nil {
-				ap.logger.Warn().Err(err).Msg("Noise reduction failed")
-			}
-		}
-
 		// Apply normalization
 		if ap.config.Normalization && ap.normalizer != nil {
-			if err := ap.normalizer.Normalize(processed); err != nil {
+			if err := ap.normalizer.Normalize(processed, ap.sampleRate, ap.channels); err != nil {
 				ap.logger.Warn().Err(err).Msg("Normalization failed")
 			}
 		}
@@ -223,7 +242,7 @@ func (ap *EnhancedAudioProcessor) Process(samples []float32, timestamp time.Time
 }
 
 // Resample resamples audio data using the configured resampler
-func (ap *EnhancedAudioProcessor) Resample(samples []float32, inputRate, outputRate int) ([]float32, error) {
+func (ap *AudioProcessor) Resample(samples []float32, inputRate, outputRate int) ([]float32, error) {
 	if ap.resampler == nil {
 		return nil, fmt.Errorf("resampler not initialized")
 	}
@@ -231,7 +250,7 @@ func (ap *EnhancedAudioProcessor) Resample(samples []float32, inputRate, outputR
 }
 
 // DetectVoiceActivity detects voice activity using the configured VAD
-func (ap *EnhancedAudioProcessor) DetectVoiceActivity(samples []float32) bool {
+func (ap *AudioProcessor) DetectVoiceActivity(samples []float32) bool {
 	if ap.vadDetector == nil {
 		return false
 	}
@@ -239,7 +258,7 @@ func (ap *EnhancedAudioProcessor) DetectVoiceActivity(samples []float32) bool {
 }
 
 // ExportWAV exports audio segment to WAV file using the configured exporter
-func (ap *EnhancedAudioProcessor) ExportWAV(segment *types.AudioSegment, path string) error {
+func (ap *AudioProcessor) ExportWAV(segment *types.AudioSegment, path string) error {
 	if ap.wavExporter == nil {
 		return fmt.Errorf("WAV exporter not initialized")
 	}
@@ -247,7 +266,7 @@ func (ap *EnhancedAudioProcessor) ExportWAV(segment *types.AudioSegment, path st
 }
 
 // ExportWAVWithMetadata exports audio segment to WAV file with metadata
-func (ap *EnhancedAudioProcessor) ExportWAVWithMetadata(segment *types.AudioSegment, path string, metadata map[string]string) error {
+func (ap *AudioProcessor) ExportWAVWithMetadata(segment *types.AudioSegment, path string, metadata map[string]string) error {
 	if ap.wavExporter == nil {
 		return fmt.Errorf("WAV exporter not initialized")
 	}
@@ -255,7 +274,7 @@ func (ap *EnhancedAudioProcessor) ExportWAVWithMetadata(segment *types.AudioSegm
 }
 
 // ComputeFFT computes FFT using the configured FFT processor
-func (ap *EnhancedAudioProcessor) ComputeFFT(samples []float32) []complex128 {
+func (ap *AudioProcessor) ComputeFFT(samples []float32) []complex128 {
 	if ap.fftProcessor == nil {
 		return nil
 	}
@@ -263,7 +282,7 @@ func (ap *EnhancedAudioProcessor) ComputeFFT(samples []float32) []complex128 {
 }
 
 // ComputePowerSpectrum computes power spectrum using the configured FFT processor
-func (ap *EnhancedAudioProcessor) ComputePowerSpectrum(samples []float32) []float64 {
+func (ap *AudioProcessor) ComputePowerSpectrum(samples []float32) []float64 {
 	if ap.fftProcessor == nil {
 		return nil
 	}
@@ -271,7 +290,7 @@ func (ap *EnhancedAudioProcessor) ComputePowerSpectrum(samples []float32) []floa
 }
 
 // ComputeSpectralCentroid computes spectral centroid using the configured FFT processor
-func (ap *EnhancedAudioProcessor) ComputeSpectralCentroid(samples []float32) float64 {
+func (ap *AudioProcessor) ComputeSpectralCentroid(samples []float32) float64 {
 	if ap.fftProcessor == nil {
 		return 0.0
 	}
@@ -279,7 +298,7 @@ func (ap *EnhancedAudioProcessor) ComputeSpectralCentroid(samples []float32) flo
 }
 
 // ApplyWindow applies a window function to the samples
-func (ap *EnhancedAudioProcessor) ApplyWindow(samples []float32, windowType string) []float32 {
+func (ap *AudioProcessor) ApplyWindow(samples []float32, windowType string) []float32 {
 	if ap.windowFunc == nil {
 		return samples
 	}
@@ -287,7 +306,7 @@ func (ap *EnhancedAudioProcessor) ApplyWindow(samples []float32, windowType stri
 }
 
 // updateHistory updates the processing history buffer
-func (ap *EnhancedAudioProcessor) updateHistory(samples []float32) {
+func (ap *AudioProcessor) updateHistory(samples []float32) {
 	const maxHistorySize = 44100 * 2
 
 	if len(ap.historyBuffer)+len(samples) > maxHistorySize {
@@ -304,7 +323,7 @@ func (ap *EnhancedAudioProcessor) updateHistory(samples []float32) {
 }
 
 // Close releases resources used by the processor
-func (ap *EnhancedAudioProcessor) Close() error {
+func (ap *AudioProcessor) Close() error {
 	var errors []error
 
 	if ap.resampler != nil {
@@ -327,12 +346,12 @@ func (ap *EnhancedAudioProcessor) Close() error {
 }
 
 // GetConfig returns the current processing configuration
-func (ap *EnhancedAudioProcessor) GetConfig() types.ProcessingConfig {
+func (ap *AudioProcessor) GetConfig() types.ProcessingConfig {
 	return ap.config
 }
 
 // UpdateConfig updates the processing configuration and reinitializes components if needed
-func (ap *EnhancedAudioProcessor) UpdateConfig(config types.ProcessingConfig) error {
+func (ap *AudioProcessor) UpdateConfig(config types.ProcessingConfig) error {
 	// Close existing components if types changed
 	if config.ResamplerType != ap.config.ResamplerType {
 		if ap.resampler != nil {
@@ -360,12 +379,6 @@ func (ap *EnhancedAudioProcessor) UpdateConfig(config types.ProcessingConfig) er
 		ap.config.WAVExporterType = config.WAVExporterType
 		ap.wavExporter = ap.createWAVExporter()
 	}
-
-	if config.FFTType != ap.config.FFTType {
-		ap.config.FFTType = config.FFTType
-		ap.fftProcessor = ap.createFFTProcessor()
-	}
-
 	// Update other configuration fields
 	ap.config = config
 
