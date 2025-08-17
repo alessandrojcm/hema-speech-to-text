@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
+	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
 func TestLoad(t *testing.T) {
@@ -77,6 +78,42 @@ logging:
 					ReplayScene: "TestReplay",
 				},
 				Audio: types.DefaultAudioConfig(),
+				Speech: speechTypes.SpeechConfig{
+					Whisper: speechTypes.WhisperConfig{
+						ModelPath:      "./models/ggml-base.bin",
+						ModelSize:      speechTypes.ModelSize(1), // base = 1
+						Language:       "en",
+						UseGPU:         true,
+						ThreadCount:    4,
+						MaxTokens:      448,
+						Temperature:    0.0,
+						BeamSize:       5,
+						WordTimestamps: true,
+					},
+					Vocabulary: speechTypes.VocabularyConfig{
+						HEMAVocabPath:    "./config/hema_vocabulary.txt",
+						BoostWeights:     nil,
+						ContextSwitching: true,
+						ValidationRules:  nil,
+						CustomTerms:      nil,
+					},
+					Processing: speechTypes.ProcessingConfig{
+						TargetSampleRate: 16000,
+						SegmentDuration:  10 * time.Second,
+						OverlapDuration:  1 * time.Second,
+						NoiseReduction:   false,
+						Normalization:    true,
+						VADEnabled:       true,
+					},
+					Performance: speechTypes.PerformanceConfig{
+						MaxConcurrent:     3,
+						CacheSize:         1000,
+						CacheTTL:          5 * time.Minute,
+						TimeoutDuration:   30 * time.Second,
+						MemoryLimit:       1073741824, // 1GB
+						MetalOptimization: true,
+					},
+				},
 				Logging: LoggingConfig{
 					Level:  "debug",
 					Format: "console",
@@ -161,6 +198,15 @@ func TestValidateConfig(t *testing.T) {
 					ReplayScene: "Replay",
 				},
 				Audio: types.DefaultAudioConfig(),
+				Speech: speechTypes.SpeechConfig{
+					Whisper: speechTypes.WhisperConfig{
+						ModelPath: "./models/ggml-base.bin",
+					},
+					Performance: speechTypes.PerformanceConfig{
+						MaxConcurrent:   3,
+						TimeoutDuration: 30 * time.Second,
+					},
+				},
 			},
 			expectError: false,
 		},

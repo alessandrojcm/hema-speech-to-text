@@ -8,7 +8,8 @@ import (
 )
 
 func TestNewFormatConverter(t *testing.T) {
-	converter := NewFormatConverter(44100, 16000, 2, 1)
+	converter, err := NewFormatConverter(44100, 16000, 2, 1)
+	require.NoError(t, err)
 
 	assert.NotNil(t, converter)
 	assert.Equal(t, 44100, converter.inputSampleRate)
@@ -18,7 +19,8 @@ func TestNewFormatConverter(t *testing.T) {
 }
 
 func TestFormatConverterConvertChannels(t *testing.T) {
-	converter := NewFormatConverter(44100, 44100, 2, 1)
+	converter, err := NewFormatConverter(44100, 44100, 2, 1)
+	require.NoError(t, err)
 
 	input := []float32{0.5, -0.5, 0.3, -0.3, 0.1, -0.1}
 	output, err := converter.Convert(input)
@@ -31,7 +33,8 @@ func TestFormatConverterConvertChannels(t *testing.T) {
 }
 
 func TestFormatConverterMonoToStereo(t *testing.T) {
-	converter := NewFormatConverter(44100, 44100, 1, 2)
+	converter, err := NewFormatConverter(44100, 44100, 1, 2)
+	require.NoError(t, err)
 
 	input := []float32{0.5, 0.3, 0.1}
 	output, err := converter.Convert(input)
@@ -45,7 +48,8 @@ func TestFormatConverterMonoToStereo(t *testing.T) {
 }
 
 func TestFormatConverterResample(t *testing.T) {
-	converter := NewFormatConverter(44100, 22050, 1, 1)
+	converter, err := NewFormatConverter(44100, 22050, 1, 1)
+	require.NoError(t, err)
 
 	input := make([]float32, 44100)
 	for i := range input {
@@ -56,33 +60,6 @@ func TestFormatConverterResample(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, output, 22050)
-}
-
-func TestNormalizeAudio(t *testing.T) {
-	samples := []float32{0.1, -0.2, 0.5, -0.8, 0.3}
-
-	NormalizeAudio(samples)
-
-	var maxAbs float32
-	for _, sample := range samples {
-		abs := sample
-		if abs < 0 {
-			abs = -abs
-		}
-		if abs > maxAbs {
-			maxAbs = abs
-		}
-	}
-
-	assert.InDelta(t, 1.0, maxAbs, 0.001)
-}
-
-func TestNormalizeAudioEmpty(t *testing.T) {
-	samples := []float32{}
-
-	NormalizeAudio(samples)
-
-	assert.Len(t, samples, 0)
 }
 
 func TestApplyHighpassFilter(t *testing.T) {

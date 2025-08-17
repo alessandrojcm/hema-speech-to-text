@@ -5,6 +5,7 @@
       "mode": "subagent",
       "model": "anthropic/claude-sonnet-4-20250514",
       "prompt": "{file:./prompts/agents/devserver.txt}",
+      "description": "Use this subagent to run the dev server in the background",
       "tools": {
         "write": false,
         "edit": false,

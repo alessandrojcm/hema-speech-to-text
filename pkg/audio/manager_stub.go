@@ -36,3 +36,7 @@ func (am *AudioManager) GetHealth() types.SystemHealth {
 func (am *AudioManager) GetStats() types.CaptureStats {
 	return types.CaptureStats{}
 }
+
+func (am *AudioManager) ListDevices() ([]types.DeviceInfo, error) {
+	return nil, fmt.Errorf("audio support not available in this build")
+}

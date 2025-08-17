@@ -3,6 +3,7 @@ package vocabulary
 import (
 	"bufio"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -205,9 +206,7 @@ func (hv *HEMAVocabulary) GetAllTerms() map[string]VocabularyTerm {
 	defer hv.mu.RUnlock()
 
 	result := make(map[string]VocabularyTerm)
-	for k, v := range hv.terms {
-		result[k] = v
-	}
+	maps.Copy(result, hv.terms)
 
 	return result
 }
@@ -246,7 +245,7 @@ func (hv *HEMAVocabulary) AddTerm(term VocabularyTerm) {
 }
 
 // GetStats returns vocabulary statistics
-func (hv *HEMAVocabulary) GetStats() map[string]interface{} {
+func (hv *HEMAVocabulary) GetStats() map[string]any {
 	hv.mu.RLock()
 	defer hv.mu.RUnlock()
 
@@ -255,7 +254,7 @@ func (hv *HEMAVocabulary) GetStats() map[string]interface{} {
 		categoryStats[category] = len(terms)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_terms":      len(hv.terms),
 		"total_categories": len(hv.categories),
 		"category_stats":   categoryStats,
