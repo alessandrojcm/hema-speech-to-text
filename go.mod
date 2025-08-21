@@ -10,6 +10,7 @@ require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/transforms v0.0.0-20180121090939-51830ccc35a5
 	github.com/go-audio/wav v1.1.0
+	github.com/go-skynet/go-llama.cpp v0.0.0-20240314183750-6a8041ef6b46
 	github.com/gordonklaus/portaudio v0.0.0-20250206071425-98a94950218b
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/orcaman/writerseeker v0.0.0-20200621085525-1d3f536ff85e
@@ -50,3 +51,5 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/go-skynet/go-llama.cpp => ./go-llama.cpp

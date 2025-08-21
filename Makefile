@@ -16,9 +16,13 @@ GGML_CUDA=0
 # Build flags
 LDFLAGS=-ldflags "-s -w"
 BUILD_FLAGS=-trimpath $(LDFLAGS)
-C_INCLUDE_PATH=$(abspath ./whisper.cpp/include):$(abspath ./whisper.cpp/ggml/include)
-LIBRARY_PATH=$(abspath ./whisper.cpp/build_go/src):$(abspath ./whisper.cpp/build_go/ggml/src):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-metal):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-cpu):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-blas)
+C_INCLUDE_PATH=$(abspath ./whisper.cpp/include):$(abspath ./whisper.cpp/ggml/include):$(abspath ./go-llama.cpp)
+LIBRARY_PATH=$(abspath ./whisper.cpp/build_go/src):$(abspath ./whisper.cpp/build_go/ggml/src):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-metal):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-cpu):$(abspath ./whisper.cpp/build_go/ggml/src/ggml-blas):$(abspath ./go-llama.cpp)
 GGML_METAL_PATH_RESOURCES := $(abspath ./whisper.cpp/ggml)
+
+# go-llama.cpp build flags for Metal support
+BUILD_TYPE=metal
+CGO_LDFLAGS_LLAMA=-framework Metal -framework Foundation
 
 # Colors for output
 GREEN=\033[0;32m
@@ -26,15 +30,15 @@ YELLOW=\033[1;33m
 RED=\033[0;31m
 NC=\033[0m # No Color
 
-.PHONY: all build clean test coverage deps fmt vet lint run install help run-debug run-debug-headless
+.PHONY: all build clean test coverage deps fmt vet lint run install help run-debug run-debug-headless whisper llama
 
 all: deps fmt vet test build
 
 # Build the application
-build: whisper
+build: whisper llama
 	@echo "$(GREEN)Building $(BINARY_NAME)...$(NC)"
 	@mkdir -p bin
-	@C_INCLUDE_PATH=${C_INCLUDE_PATH} GGML_METAL_PATH_RESOURCES=${GGML_METAL_PATH_RESOURCES} LIBRARY_PATH=${LIBRARY_PATH} $(GOBUILD) $(BUILD_FLAGS) -o $(BINARY_PATH) $(MAIN_PATH)
+	@C_INCLUDE_PATH=${C_INCLUDE_PATH} GGML_METAL_PATH_RESOURCES=${GGML_METAL_PATH_RESOURCES} LIBRARY_PATH=${LIBRARY_PATH} BUILD_TYPE=${BUILD_TYPE} CGO_LDFLAGS="${CGO_LDFLAGS_LLAMA}" $(GOBUILD) $(BUILD_FLAGS) -o $(BINARY_PATH) $(MAIN_PATH)
 	@echo "$(GREEN)Build complete: $(BINARY_PATH)$(NC)"
 
 # Clean build artifacts
@@ -43,6 +47,8 @@ clean:
 	$(GOCLEAN)
 	@rm -rf bin/
 	@rm -rf coverage/
+	@cd ./whisper.cpp/bindings/go && make clean
+	@cd ./go-llama.cpp && make clean
 	@echo "$(GREEN)Clean complete$(NC)"
 
 # Run tests
@@ -99,12 +105,14 @@ run: build
 	$(BINARY_PATH) $(ARGS)
 
 # Run with debugger attached (starts immediately)
-run-debug: whisper
+run-debug: whisper llama
 	@echo "$(GREEN)Running $(BINARY_NAME) in debug mode...$(NC)"
 	@echo "$(ARGS)"
 	C_INCLUDE_PATH=$(C_INCLUDE_PATH) \
 	GGML_METAL_PATH_RESOURCES=$(GGML_METAL_PATH_RESOURCES) \
 	LIBRARY_PATH=$(LIBRARY_PATH) \
+	BUILD_TYPE=$(BUILD_TYPE) \
+	CGO_LDFLAGS="$(CGO_LDFLAGS_LLAMA)" \
 	PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$$PKG_CONFIG_PATH" \
 	$(shell go env GOPATH)/bin/dlv debug $(MAIN_PATH) \
 	  --allow-non-terminal-interactive=true \
@@ -112,13 +120,15 @@ run-debug: whisper
 	  -- $(ARGS)
 
 # Run in headless mode for remote debugging (waits for client connection)
-run-debug-headless: whisper
+run-debug-headless: whisper llama
 	@echo "$(GREEN)Running $(BINARY_NAME) in headless debug mode...$(NC)"
 	@echo "$(GREEN)Connect with: dlv connect localhost:53412$(NC)"
 	@echo "$(ARGS)"
 	C_INCLUDE_PATH=$(C_INCLUDE_PATH) \
 	GGML_METAL_PATH_RESOURCES=$(GGML_METAL_PATH_RESOURCES) \
 	LIBRARY_PATH=$(LIBRARY_PATH) \
+	BUILD_TYPE=$(BUILD_TYPE) \
+	CGO_LDFLAGS="$(CGO_LDFLAGS_LLAMA)" \
 	PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$$PKG_CONFIG_PATH" \
 	$(shell go env GOPATH)/bin/dlv debug $(MAIN_PATH) \
 	  --headless --listen=:53412 --api-version=2 --log \
@@ -135,8 +145,12 @@ install: build
 	@cp $(BINARY_PATH) $(GOPATH)/bin/$(BINARY_NAME)
 
 whisper:
-	@echo "$(GREEN)Bulding whisper$(NC)"
+	@echo "$(GREEN)Building whisper$(NC)"
 	@GGML_CUDA=0 make -C ./whisper.cpp/bindings/go/ whisper
+
+llama:
+	@echo "$(GREEN)Building go-llama.cpp$(NC)"
+	@cd ./go-llama.cpp && BUILD_TYPE=metal make
 
 # Development tools
 dev-setup:

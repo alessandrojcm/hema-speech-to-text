@@ -7,9 +7,7 @@ import (
 	"sync"
 	"time"
 
-	// TODO: Update this import path when go-llama.cpp submodule is added
-	// llama "github.com/your-org/hema-replay-system/go-llama.cpp"
-
+	llama "github.com/go-skynet/go-llama.cpp"
 	"github.com/rs/zerolog"
 	"github.com/your-org/hema-replay-system/pkg/llm/types"
 )
@@ -21,7 +19,7 @@ type LlamaEngine struct {
 	logger zerolog.Logger
 
 	// Model state
-	// llm             *llama.LLama  // TODO: Uncomment when go-llama.cpp is available
+	llm       *llama.LLama
 	modelPath string
 	isReady   bool
 	startTime time.Time
@@ -35,7 +33,7 @@ type LlamaEngine struct {
 	memoryUsage    uint64
 
 	// Options cache
-	// options         []llama.PredictOption  // TODO: Uncomment when go-llama.cpp is available
+	options []llama.PredictOption
 }
 
 // NewLlamaEngine creates a new LlamaEngine instance
@@ -55,7 +53,6 @@ func NewLlamaEngine(config *types.LLMConfig, logger zerolog.Logger) (*LlamaEngin
 		startTime: time.Now(),
 	}
 
-	// TODO: Implement actual model loading when go-llama.cpp is available
 	if err := engine.loadModel(); err != nil {
 		return nil, fmt.Errorf("failed to load model: %w", err)
 	}
@@ -72,42 +69,39 @@ func NewLlamaEngine(config *types.LLMConfig, logger zerolog.Logger) (*LlamaEngin
 
 // loadModel loads the LLM model with the configured options
 func (e *LlamaEngine) loadModel() error {
-	// TODO: Implement actual model loading when go-llama.cpp is available
-	/*
-		// Build model options
-		modelOpts := []llama.ModelOption{
-			llama.SetContext(e.config.ContextSize),
-			llama.SetMMap(e.config.UseMMap),
-		}
+	// Build model options
+	modelOpts := []llama.ModelOption{
+		llama.SetContext(e.config.ContextSize),
+		llama.SetMMap(e.config.UseMMap),
+	}
 
-		if e.config.UseGPU {
-			modelOpts = append(modelOpts, llama.SetGPULayers(e.config.GPULayers))
-		}
+	if e.config.UseGPU {
+		modelOpts = append(modelOpts, llama.SetGPULayers(e.config.GPULayers))
+	}
 
-		if e.config.EnableLowVRAM {
-			modelOpts = append(modelOpts, llama.EnableLowVRAM)
-		}
+	if e.config.EnableLowVRAM {
+		modelOpts = append(modelOpts, llama.EnabelLowVRAM)
+	}
 
-		// Initialize the model
-		llm, err := llama.New(e.config.ModelPath, modelOpts...)
-		if err != nil {
-			return fmt.Errorf("failed to load model: %w", err)
-		}
+	// Initialize the model
+	llm, err := llama.New(e.config.ModelPath, modelOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to load model: %w", err)
+	}
 
-		e.llm = llm
+	e.llm = llm
 
-		// Build prediction options
-		e.options = []llama.PredictOption{
-			llama.SetThreads(e.config.Threads),
-			llama.SetTokens(e.config.MaxTokens),
-			llama.SetTopP(e.config.TopP),
-			llama.SetTopK(e.config.TopK),
-			llama.SetTemperature(e.config.Temperature),
-			llama.SetPenalty(e.config.RepeatPenalty),
-			llama.SetSeed(e.config.Seed),
-			llama.SetMlock(e.config.UseMlock),
-		}
-	*/
+	// Build prediction options
+	e.options = []llama.PredictOption{
+		llama.SetThreads(e.config.Threads),
+		llama.SetTokens(e.config.MaxTokens),
+		llama.SetTopP(e.config.TopP),
+		llama.SetTopK(e.config.TopK),
+		llama.SetTemperature(e.config.Temperature),
+		llama.SetPenalty(e.config.RepeatPenalty),
+		llama.SetSeed(e.config.Seed),
+		llama.SetMlock(e.config.UseMlock),
+	}
 
 	// Placeholder implementation
 	e.logger.Info().Msg("Model loading placeholder - go-llama.cpp not available yet")
@@ -137,7 +131,6 @@ func (e *LlamaEngine) Generate(request types.GenerationRequest) (*types.Generati
 
 	startTime := time.Now()
 
-	// TODO: Implement actual generation when go-llama.cpp is available
 	response, err := e.generateText(request)
 	if err != nil {
 		e.recordError(err)
@@ -158,94 +151,70 @@ func (e *LlamaEngine) Generate(request types.GenerationRequest) (*types.Generati
 func (e *LlamaEngine) generateText(request types.GenerationRequest) (*types.GenerationResponse, error) {
 	startTime := time.Now()
 
-	// TODO: Implement actual generation when go-llama.cpp is available
-	/*
-		e.mu.RLock()
-		defer e.mu.RUnlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 
-		// Use request-specific options if provided
-		options := e.options
-		if request.MaxTokens > 0 {
-			options = append(options, llama.SetTokens(request.MaxTokens))
+	// Use request-specific options if provided
+	options := e.options
+	if request.MaxTokens > 0 {
+		options = append(options, llama.SetTokens(request.MaxTokens))
+	}
+	if request.Temperature > 0 {
+		options = append(options, llama.SetTemperature(request.Temperature))
+	}
+	if request.TopP > 0 {
+		options = append(options, llama.SetTopP(request.TopP))
+	}
+	if request.TopK > 0 {
+		options = append(options, llama.SetTopK(request.TopK))
+	}
+
+	// Generate with timeout
+	resultChan := make(chan string, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		response, err := e.llm.Predict(request.Prompt, options...)
+		if err != nil {
+			errChan <- err
+			return
 		}
-		if request.Temperature > 0 {
-			options = append(options, llama.SetTemperature(request.Temperature))
-		}
-		if request.TopP > 0 {
-			options = append(options, llama.SetTopP(request.TopP))
-		}
-		if request.TopK > 0 {
-			options = append(options, llama.SetTopK(request.TopK))
-		}
+		resultChan <- response
+	}()
 
-		// Generate with timeout
-		resultChan := make(chan string, 1)
-		errChan := make(chan error, 1)
+	timeout := request.Timeout
+	if timeout == 0 {
+		timeout = e.config.Timeout
+	}
 
-		go func() {
-			response, err := e.llm.Predict(request.Prompt, options...)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			resultChan <- response
-		}()
+	select {
+	case text := <-resultChan:
+		// Process successful generation
+		processingTime := time.Since(startTime)
 
-		timeout := request.Timeout
-		if timeout == 0 {
-			timeout = e.config.Timeout
-		}
+		return &types.GenerationResponse{
+			Text:         text,
+			TokenCount:   len(text) / 4, // Rough estimate, 4 chars per token
+			FinishReason: "stop",
+			Latency:      processingTime,
+			Metadata: types.GenerationMetadata{
+				ModelName:        e.modelPath,
+				TokensPerSecond:  float64(len(text)/4) / processingTime.Seconds(),
+				PromptTokens:     len(request.Prompt) / 4, // Rough estimate
+				CompletionTokens: len(text) / 4,           // Rough estimate
+				TotalTokens:      (len(request.Prompt) + len(text)) / 4,
+				GPUUsed:          e.config.UseGPU,
+				ProcessingTime:   processingTime,
+			},
+			Timestamp: time.Now(),
+		}, nil
 
-		select {
-		case text := <-resultChan:
-			// Process successful generation
-			processingTime := time.Since(startTime)
+	case err := <-errChan:
+		return nil, err
 
-			return &types.GenerationResponse{
-				Text:         text,
-				TokenCount:   len(text) / 4, // Rough estimate, 4 chars per token
-				FinishReason: "stop",
-				Latency:      processingTime,
-				Metadata: types.GenerationMetadata{
-					ModelName:        e.modelPath,
-					TokensPerSecond:  float64(len(text)/4) / processingTime.Seconds(),
-					PromptTokens:     len(request.Prompt) / 4, // Rough estimate
-					CompletionTokens: len(text) / 4,           // Rough estimate
-					TotalTokens:      (len(request.Prompt) + len(text)) / 4,
-					GPUUsed:          e.config.UseGPU,
-					ProcessingTime:   processingTime,
-				},
-				Timestamp: time.Now(),
-			}, nil
-
-		case err := <-errChan:
-			return nil, err
-
-		case <-time.After(timeout):
-			return nil, types.ErrGenerationTimeout
-		}
-	*/
-
-	// Placeholder implementation for testing
-	processingTime := time.Since(startTime)
-	text := fmt.Sprintf("Generated commentary for: %s", request.Prompt)
-
-	return &types.GenerationResponse{
-		Text:         text,
-		TokenCount:   len(text) / 4,
-		FinishReason: "stop",
-		Latency:      processingTime,
-		Metadata: types.GenerationMetadata{
-			ModelName:        e.modelPath,
-			TokensPerSecond:  float64(len(text)/4) / processingTime.Seconds(),
-			PromptTokens:     len(request.Prompt) / 4,
-			CompletionTokens: len(text) / 4,
-			TotalTokens:      (len(request.Prompt) + len(text)) / 4,
-			GPUUsed:          e.config.UseGPU,
-			ProcessingTime:   processingTime,
-		},
-		Timestamp: time.Now(),
-	}, nil
+	case <-time.After(timeout):
+		return nil, types.ErrGenerationTimeout
+	}
 }
 
 // GetStatus returns the current status of the engine
@@ -293,13 +262,10 @@ func (e *LlamaEngine) Close() error {
 		return nil
 	}
 
-	// TODO: Implement actual cleanup when go-llama.cpp is available
-	/*
-		if e.llm != nil {
-			e.llm.Free()
-			e.llm = nil
-		}
-	*/
+	if e.llm != nil {
+		e.llm.Free()
+		e.llm = nil
+	}
 
 	e.isReady = false
 	e.logger.Info().Msg("LlamaEngine closed")
