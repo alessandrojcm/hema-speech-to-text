@@ -410,6 +410,7 @@ func NewRelevanceScorer() *RelevanceScorer {
 			"red", "blue", "attack", "defense",
 			"parry", "riposte", "thrust", "cut", "pommel", "bind",
 			"director", "judge", "halt", "warning", "card", "match",
+			"shallow", "deep", "target", "ring", "pushed", "area", "tempo",
 		},
 	}
 }
@@ -423,22 +424,9 @@ func (rs *RelevanceScorer) Score(commentary, transcription string) float32 {
 		return 0.0
 	}
 
-	// Calculate word overlap
-	transcriptionSet := make(map[string]bool)
-	for _, word := range transcriptionWords {
-		transcriptionSet[word] = true
-	}
-
-	overlap := 0
+	// Calculate HEMA-specific terms
 	hemaTerms := 0
-
 	for _, word := range commentaryWords {
-		// Check direct word overlap
-		if transcriptionSet[word] {
-			overlap++
-		}
-
-		// Check HEMA-specific terms
 		for _, keyword := range rs.hemaKeywords {
 			if strings.Contains(word, keyword) || strings.Contains(keyword, word) {
 				hemaTerms++
@@ -448,13 +436,46 @@ func (rs *RelevanceScorer) Score(commentary, transcription string) float32 {
 	}
 
 	// Calculate relevance score
-	wordOverlapScore := float32(overlap) / float32(len(commentaryWords))
 	hemaRelevanceScore := float32(hemaTerms) / float32(len(commentaryWords))
 
-	// Weighted combination
-	relevance := (wordOverlapScore * 0.6) + (hemaRelevanceScore * 0.4)
+	// Calculate semantic similarity using Jaccard similarity
+	semanticScore := rs.jaccardSimilarity(commentaryWords, transcriptionWords)
+
+	// Weighted combination: 50% HEMA relevance + 50% semantic similarity
+	relevance := (hemaRelevanceScore * 0.5) + (semanticScore * 0.5)
 
 	return min(1.0, relevance)
+}
+
+// jaccardSimilarity calculates Jaccard similarity between two sets of words
+func (rs *RelevanceScorer) jaccardSimilarity(words1, words2 []string) float32 {
+	// Create sets
+	set1 := make(map[string]bool)
+	set2 := make(map[string]bool)
+
+	for _, word := range words1 {
+		set1[word] = true
+	}
+	for _, word := range words2 {
+		set2[word] = true
+	}
+
+	// Calculate intersection
+	intersection := 0
+	for word := range set1 {
+		if set2[word] {
+			intersection++
+		}
+	}
+
+	// Calculate union
+	union := len(set1) + len(set2) - intersection
+
+	if union == 0 {
+		return 0.0
+	}
+
+	return float32(intersection) / float32(union)
 }
 
 // Utility functions
