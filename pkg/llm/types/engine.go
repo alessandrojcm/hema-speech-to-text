@@ -31,7 +31,6 @@ type GenerationMetadata struct {
 	PromptTokens     int           `json:"prompt_tokens"`
 	CompletionTokens int           `json:"completion_tokens"`
 	TotalTokens      int           `json:"total_tokens"`
-	GPUUsed          bool          `json:"gpu_used"`
 	ProcessingTime   time.Duration `json:"processing_time"`
 }
 

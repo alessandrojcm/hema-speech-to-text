@@ -9,17 +9,22 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
+
+	commentaryTypes "github.com/your-org/hema-replay-system/pkg/commentary/types"
+	llm "github.com/your-org/hema-replay-system/pkg/llm/types"
 	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
 type Config struct {
-	OBS     OBSConfig                `mapstructure:"obs"`
-	Replay  ReplayConfig             `mapstructure:"replay"`
-	Text    TextConfig               `mapstructure:"text"`
-	Scene   SceneConfig              `mapstructure:"scene"`
-	Audio   types.AudioConfig        `mapstructure:"audio"`
-	Speech  speechTypes.SpeechConfig `mapstructure:"speech"`
-	Logging LoggingConfig            `mapstructure:"logging"`
+	OBS        OBSConfig                        `mapstructure:"obs"`
+	Replay     ReplayConfig                     `mapstructure:"replay"`
+	Text       TextConfig                       `mapstructure:"text"`
+	Scene      SceneConfig                      `mapstructure:"scene"`
+	Audio      types.AudioConfig                `mapstructure:"audio"`
+	Speech     speechTypes.SpeechConfig         `mapstructure:"speech"`
+	LLMConfig  llm.LLMConfig                    `mapstructure:"llm"`
+	Commentary commentaryTypes.CommentaryConfig `mapstructure:"commentary"`
+	Logging    LoggingConfig                    `mapstructure:"logging"`
 }
 
 type OBSConfig struct {
@@ -191,6 +196,29 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("speech.performance.memory_limit", 1073741824) // 1GB
 	v.SetDefault("speech.performance.metal_optimization", true)
 
+	// LLM defaults
+	v.SetDefault("openaiendpoint", "http://localhost:8000")
+
+	// Commentary defaults
+	v.SetDefault("commentary.default_template", "point_scored")
+	v.SetDefault("commentary.max_latency", "2s")
+	v.SetDefault("commentary.default_quality", "balanced")
+	v.SetDefault("commentary.concurrent_requests", 3)
+	v.SetDefault("commentary.min_confidence", 0.6)
+	v.SetDefault("commentary.quality_threshold", 0.7)
+	v.SetDefault("commentary.relevance_threshold", 0.75)
+	v.SetDefault("commentary.enable_fallback", true)
+	v.SetDefault("commentary.fallback_threshold", 0.6)
+	v.SetDefault("commentary.max_retries", 2)
+	v.SetDefault("commentary.max_output_length", 200)
+	v.SetDefault("commentary.min_output_length", 10)
+	v.SetDefault("commentary.enable_profanity_filter", true)
+	v.SetDefault("commentary.enable_cache", true)
+	v.SetDefault("commentary.default_cache_policy", "default")
+	v.SetDefault("commentary.enable_metrics", true)
+	v.SetDefault("commentary.enable_logging", true)
+	v.SetDefault("commentary.log_level", "info")
+
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
@@ -230,6 +258,25 @@ func validateConfig(config *Config) error {
 	}
 	if config.Speech.Performance.TimeoutDuration <= 0 {
 		return fmt.Errorf("speech.performance.timeout_duration must be positive")
+	}
+
+	// Validate LLM configuration
+	if config.OpenAIEndpoint == "" {
+		return fmt.Errorf("llm.model_path cannot be empty")
+	}
+
+	// Validate commentary configuration
+	if config.Commentary.MaxLatency <= 0 {
+		return fmt.Errorf("commentary.max_latency must be positive")
+	}
+	if config.Commentary.MaxRetries < 0 {
+		return fmt.Errorf("commentary.max_retries cannot be negative")
+	}
+	if config.Commentary.MinConfidence < 0 || config.Commentary.MinConfidence > 1 {
+		return fmt.Errorf("commentary.min_confidence must be between 0 and 1")
+	}
+	if config.Commentary.ConcurrentRequests <= 0 {
+		return fmt.Errorf("commentary.concurrent_requests must be positive")
 	}
 
 	return nil

@@ -5,3 +5,6 @@
 bin/
 *.test
 __debug_*
+.DS_Store
+**/.DS_Store
+.idea
