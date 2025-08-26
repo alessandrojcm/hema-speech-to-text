@@ -80,13 +80,12 @@ func NewSpeechManager(config speechTypes.SpeechConfig, logger zerolog.Logger) (*
 		config:       config,
 		modelManager: modelManager,
 		vocabulary:   vocab,
-		// ❌ preprocessor removed - using pkg/audio/processing instead
-		cache:       cache,
-		pipeline:    pipeline,
-		metrics:     metrics,
-		semaphore:   make(chan struct{}, config.Performance.MaxConcurrent),
-		activeTasks: make(map[string]*TranscriptionTask),
-		logger:      logger.With().Str("component", "speech_manager").Logger(),
+		cache:        cache,
+		pipeline:     pipeline,
+		metrics:      metrics,
+		semaphore:    make(chan struct{}, config.Performance.MaxConcurrent),
+		activeTasks:  make(map[string]*TranscriptionTask),
+		logger:       logger.With().Str("component", "speech_manager").Logger(),
 	}, nil
 }
 

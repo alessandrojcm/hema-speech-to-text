@@ -7,8 +7,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
 
-	audio "github.com/go-audio/audio"
-	transforms "github.com/go-audio/transforms"
+	"github.com/go-audio/audio"
+	"github.com/go-audio/transforms"
 )
 
 type AudioFilter interface {
@@ -383,4 +383,17 @@ func (ap *AudioProcessor) UpdateConfig(config types.ProcessingConfig) error {
 	ap.config = config
 
 	return nil
+}
+
+// AssessAudioQuality evaluates the quality and characteristics of audio samples
+func (ap *AudioProcessor) AssessAudioQuality(samples []float32) types.SegmentMetadata {
+	if ap.qualityMeter == nil {
+		// Return basic metadata if quality meter is not available
+		return types.SegmentMetadata{
+			SampleRate: ap.sampleRate,
+			Channels:   ap.channels,
+			Quality:    0.5, // Default moderate quality
+		}
+	}
+	return ap.qualityMeter.AssessQuality(samples)
 }

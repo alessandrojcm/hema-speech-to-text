@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -12,19 +13,22 @@ import (
 
 	commentaryTypes "github.com/your-org/hema-replay-system/pkg/commentary/types"
 	llm "github.com/your-org/hema-replay-system/pkg/llm/types"
+	"github.com/your-org/hema-replay-system/pkg/pipeline"
 	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
 type Config struct {
-	OBS        OBSConfig                        `mapstructure:"obs"`
-	Replay     ReplayConfig                     `mapstructure:"replay"`
-	Text       TextConfig                       `mapstructure:"text"`
-	Scene      SceneConfig                      `mapstructure:"scene"`
-	Audio      types.AudioConfig                `mapstructure:"audio"`
-	Speech     speechTypes.SpeechConfig         `mapstructure:"speech"`
-	LLMConfig  llm.LLMConfig                    `mapstructure:"llm"`
-	Commentary commentaryTypes.CommentaryConfig `mapstructure:"commentary"`
-	Logging    LoggingConfig                    `mapstructure:"logging"`
+	OBS            OBSConfig                        `mapstructure:"obs"`
+	Replay         ReplayConfig                     `mapstructure:"replay"`
+	Text           TextConfig                       `mapstructure:"text"`
+	Scene          SceneConfig                      `mapstructure:"scene"`
+	Audio          types.AudioConfig                `mapstructure:"audio"`
+	Speech         speechTypes.SpeechConfig         `mapstructure:"speech"`
+	LLMConfig      llm.LLMConfig                    `mapstructure:"llm"`
+	Commentary     commentaryTypes.CommentaryConfig `mapstructure:"commentary"`
+	Pipeline       pipeline.PipelineManagerConfig   `mapstructure:"pipeline"`
+	Logging        LoggingConfig                    `mapstructure:"logging"`
+	OpenAIEndpoint string                           `mapstructure:"openaiendpoint"`
 }
 
 type OBSConfig struct {
@@ -78,7 +82,8 @@ func Load(configPath string) (*Config, error) {
 
 	// Read config file
 	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if !errors.As(err, &configFileNotFoundError) {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 		log.Warn().Msg("No config file found, using defaults")
@@ -196,6 +201,39 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("speech.performance.memory_limit", 1073741824) // 1GB
 	v.SetDefault("speech.performance.metal_optimization", true)
 
+	// Pipeline defaults
+	v.SetDefault("pipeline.audio.device.sample_rate", 16000)
+	v.SetDefault("pipeline.audio.device.channels", 1)
+	v.SetDefault("pipeline.audio.device.bit_depth", 16)
+	v.SetDefault("pipeline.audio.buffer.duration", "60s")
+	v.SetDefault("pipeline.audio.buffer.segment_size", "1s")
+	v.SetDefault("pipeline.audio.processing.vad_type", "webrtc")
+	v.SetDefault("pipeline.audio.extraction.default_duration", "5s")
+	v.SetDefault("pipeline.audio.extraction.max_concurrent", 2)
+	v.SetDefault("pipeline.audio.buffer.frames_per_buffer", 1024)
+
+	v.SetDefault("pipeline.speech.whisper.model_size", "base")
+	v.SetDefault("pipeline.speech.whisper.language", "en")
+	v.SetDefault("pipeline.speech.whisper.thread_count", 2)
+	v.SetDefault("pipeline.speech.performance.max_concurrent", 2)
+	v.SetDefault("pipeline.speech.performance.cache_size", 10)
+	v.SetDefault("pipeline.speech.performance.timeout_duration", "10s")
+
+	v.SetDefault("pipeline.vad.min_speech_duration_ms", 500)
+	v.SetDefault("pipeline.vad.max_silence_duration_ms", 1000)
+	v.SetDefault("pipeline.vad.vad_mode", 2)
+	v.SetDefault("pipeline.vad.buffer_before_ms", 100)
+	v.SetDefault("pipeline.vad.buffer_after_ms", 200)
+
+	v.SetDefault("pipeline.pipeline.max_concurrent_requests", 3)
+	v.SetDefault("pipeline.pipeline.processing_timeout", "30s")
+	v.SetDefault("pipeline.pipeline.segment_buffer_size", 50)
+	v.SetDefault("pipeline.pipeline.max_retries", 3)
+	v.SetDefault("pipeline.pipeline.retry_delay", "1s")
+	v.SetDefault("pipeline.pipeline.fallback_enabled", true)
+	v.SetDefault("pipeline.pipeline.metrics_enabled", true)
+	v.SetDefault("pipeline.pipeline.metrics_interval", "10s")
+
 	// LLM defaults
 	v.SetDefault("openaiendpoint", "http://localhost:8000")
 
@@ -260,9 +298,9 @@ func validateConfig(config *Config) error {
 		return fmt.Errorf("speech.performance.timeout_duration must be positive")
 	}
 
-	// Validate LLM configuration
+	// Validate LLM configuration (optional in pipeline mode)
 	if config.OpenAIEndpoint == "" {
-		return fmt.Errorf("llm.model_path cannot be empty")
+		config.OpenAIEndpoint = "http://localhost:8000" // Set default if not provided
 	}
 
 	// Validate commentary configuration
@@ -277,6 +315,11 @@ func validateConfig(config *Config) error {
 	}
 	if config.Commentary.ConcurrentRequests <= 0 {
 		return fmt.Errorf("commentary.concurrent_requests must be positive")
+	}
+
+	// Validate pipeline configuration
+	if err := config.Pipeline.Validate(); err != nil {
+		return fmt.Errorf("pipeline configuration invalid: %w", err)
 	}
 
 	return nil

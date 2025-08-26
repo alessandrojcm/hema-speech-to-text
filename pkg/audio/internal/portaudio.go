@@ -92,12 +92,15 @@ func (pa *PortAudioWrapper) FindDevice(name string, id int) (*portaudio.DeviceIn
 	}
 
 	if id >= 0 && id < len(devices) {
-		return devices[id], nil
+		device := devices[id]
+		if device.MaxInputChannels > 0 {
+			return device, nil
+		}
 	}
 
 	if name != "" {
 		for _, device := range devices {
-			if device.Name == name {
+			if device.Name == name && device.MaxInputChannels > 0 {
 				return device, nil
 			}
 		}
@@ -120,6 +123,12 @@ type AudioStream struct {
 func (pa *PortAudioWrapper) OpenStream(device *portaudio.DeviceInfo, config types.DeviceConfig) (*AudioStream, error) {
 	if !pa.initialized {
 		return nil, types.ErrInitializationFailed
+	}
+
+	// Validate channel count against device capabilities
+	if config.Channels > device.MaxInputChannels {
+		return nil, fmt.Errorf("requested %d channels but device '%s' only supports %d input channels",
+			config.Channels, device.Name, device.MaxInputChannels)
 	}
 
 	parameters := portaudio.StreamParameters{

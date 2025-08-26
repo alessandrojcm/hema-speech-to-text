@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -19,22 +20,40 @@ import (
 	"github.com/your-org/hema-replay-system/internal/scene"
 	"github.com/your-org/hema-replay-system/internal/text"
 	"github.com/your-org/hema-replay-system/pkg/audio"
+	"github.com/your-org/hema-replay-system/pkg/audio/capture"
+	"github.com/your-org/hema-replay-system/pkg/audio/processing"
 	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
+	commentaryContext "github.com/your-org/hema-replay-system/pkg/commentary/context"
+	commentaryEngine "github.com/your-org/hema-replay-system/pkg/commentary/engine"
+	commentaryPrompt "github.com/your-org/hema-replay-system/pkg/commentary/prompt"
+	commentaryTemplates "github.com/your-org/hema-replay-system/pkg/commentary/templates"
+	commentaryTypes "github.com/your-org/hema-replay-system/pkg/commentary/types"
+	llmEngine "github.com/your-org/hema-replay-system/pkg/llm/engine"
 	"github.com/your-org/hema-replay-system/pkg/logger"
+	"github.com/your-org/hema-replay-system/pkg/pipeline"
 	"github.com/your-org/hema-replay-system/pkg/speech/engine"
+	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
 type Application struct {
-	config     *config.Config
-	logger     *logger.Logger
-	obsClient  *obs.Client
-	replayMgr  *replay.Manager
-	textMgr    *text.Manager
-	sceneMgr   *scene.Manager
-	audioMgr   *audio.AudioManager
-	speechMgr  *engine.SpeechManager
-	speechOnly bool
-	audioFile  string
+	config         *config.Config
+	logger         *logger.Logger
+	obsClient      *obs.Client
+	replayMgr      *replay.Manager
+	textMgr        *text.Manager
+	sceneMgr       *scene.Manager
+	audioMgr       *audio.AudioManager
+	speechMgr      *engine.SpeechManager
+	pipelineMgr    *pipeline.Manager
+	audioProcessor *processing.AudioProcessor
+	speechOnly     bool
+	audioFile      string
+	pipelineMode   bool
+
+	// Commentary system components
+	llmEngine         *llmEngine.ModelEngine
+	commentaryGen     *commentaryEngine.CommentaryGenerator
+	commentaryEnabled bool
 }
 
 func main() {
@@ -42,19 +61,21 @@ func main() {
 	var speechOnly bool
 	var audioFile string
 	var listDevices bool
+	var pipelineMode bool
 	flag.StringVar(&configPath, "config", "", "Path to configuration file")
 	flag.BoolVar(&speechOnly, "speech-only", false, "Run only speech recognition system (for testing)")
 	flag.StringVar(&audioFile, "audio-file", "", "Process a single audio file and exit (for testing)")
 	flag.BoolVar(&listDevices, "list-devices", false, "List available audio devices")
+	flag.BoolVar(&pipelineMode, "pipeline", false, "Run the complete VAD-driven pipeline system")
 	flag.Parse()
 
-	if err := run(configPath, speechOnly, audioFile, listDevices); err != nil {
+	if err := run(configPath, speechOnly, audioFile, listDevices, pipelineMode); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath string, speechOnly bool, audioFile string, listDevices bool) error {
+func run(configPath string, speechOnly bool, audioFile string, listDevices bool, pipelineMode bool) error {
 	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -73,30 +94,25 @@ func run(configPath string, speechOnly bool, audioFile string, listDevices bool)
 	}
 
 	if listDevices {
-		manager, err := audio.NewAudioManager(cfg.Audio, log.Logger)
-		if err != nil {
-			return fmt.Errorf("failed to initialize audio manager: %w", err)
-		}
-		err = manager.Start(context.Background())
-		if err != nil {
-			return fmt.Errorf("failed to start audio manager: %w", err)
-		}
-		devices, err := manager.ListDevices()
-		if err != nil {
-			return fmt.Errorf("failed to list audio devices: %w", err)
-		}
+		manager := capture.NewDeviceManager(cfg.Audio.Device, log.WithComponent("device_manager").Logger)
+		manager.Start(context.Background())
+		devices := manager.GetDevices()
 		for _, device := range devices {
-			log.Info().Msgf("Device ID: %d, Name: %s", device.ID, device.Name)
+			if device.MaxOutputChannels > 0 {
+				continue
+			}
+			log.Info().Msgf("Device ID: %d, Name: %s, Channels: %d", device.ID, device.Name, device.MaxInputChannels)
 		}
 		return nil
 	}
 
 	// Create application
 	app := &Application{
-		config:     cfg,
-		logger:     log,
-		speechOnly: speechOnly,
-		audioFile:  audioFile,
+		config:       cfg,
+		logger:       log,
+		speechOnly:   speechOnly,
+		audioFile:    audioFile,
+		pipelineMode: pipelineMode,
 	}
 
 	// Initialize components
@@ -115,6 +131,11 @@ func (a *Application) initialize() error {
 	if a.audioFile != "" {
 		a.logger.Info().Str("audio_file", a.audioFile).Msg("Initializing Audio File Processing Mode")
 		return a.initializeAudioFileMode(ctx)
+	}
+
+	if a.pipelineMode {
+		a.logger.Info().Msg("Initializing VAD-Driven Pipeline System")
+		return a.initializePipelineMode(ctx)
 	}
 
 	if a.speechOnly {
@@ -171,6 +192,17 @@ func (a *Application) initializeSpeechOnly(ctx context.Context) error {
 		if err := a.audioMgr.Start(longLivedCtx); err != nil {
 			a.logger.Warn().Err(err).Msg("Failed to start audio manager - continuing without audio")
 			a.audioMgr = nil
+		} else if a.config.Audio.Processing.EnablePreprocessing {
+			// Initialize audio processor for VAD filtering in speech-only mode
+			sampleRate := a.config.Audio.Device.SampleRate
+			channels := a.config.Audio.Device.Channels
+			audioProcessor, err := processing.NewAudioProcessor(a.config.Audio.Processing, sampleRate, channels, a.logger.WithComponent("audio_processor").Logger)
+			if err != nil {
+				a.logger.Warn().Err(err).Msg("Failed to initialize audio processor - VAD filtering disabled")
+			} else {
+				a.audioProcessor = audioProcessor
+				a.logger.Info().Msg("Audio processor initialized - VAD filtering enabled")
+			}
 		}
 	}
 
@@ -184,6 +216,15 @@ func (a *Application) initializeSpeechOnly(ctx context.Context) error {
 	// Start speech recognition with timeout context (initialization only)
 	if err := a.speechMgr.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start speech manager: %w", err)
+	}
+
+	// Initialize commentary system
+	if err := a.initializeCommentarySystem(ctx); err != nil {
+		a.logger.Warn().Err(err).Msg("Failed to initialize commentary system - continuing without commentary")
+		a.commentaryEnabled = false
+	} else {
+		a.commentaryEnabled = true
+		a.logger.Info().Msg("Commentary system initialized successfully")
 	}
 
 	if a.audioMgr != nil {
@@ -219,6 +260,10 @@ func (a *Application) mainLoop(ctx context.Context) error {
 		return a.processAudioFile(ctx)
 	}
 
+	if a.pipelineMode {
+		return a.pipelineLoop(ctx)
+	}
+
 	if a.speechOnly {
 		return a.speechOnlyLoop(ctx)
 	}
@@ -240,6 +285,216 @@ func (a *Application) mainLoop(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// initializePipelineMode initializes the pipeline system
+func (a *Application) initializePipelineMode(ctx context.Context) error {
+	// Initialize audio manager first
+	audioMgr, err := audio.NewAudioManager(a.config.Audio, a.logger.WithComponent("audio").Logger)
+	if err != nil {
+		return fmt.Errorf("failed to create audio manager: %w", err)
+	}
+	a.audioMgr = audioMgr
+
+	// Start audio capture with long-lived context
+	longLivedCtx := context.Background()
+	if err := a.audioMgr.Start(longLivedCtx); err != nil {
+		return fmt.Errorf("failed to start audio manager: %w", err)
+	}
+
+	// Create pipeline manager with all required configurations (no audio config needed)
+	pipelineConfig := &pipeline.PipelineManagerConfig{
+		Speech:   a.config.Speech,
+		VAD:      a.config.Pipeline.VAD,
+		Pipeline: a.config.Pipeline.Pipeline,
+	}
+
+	// Set defaults for pipeline configuration
+	pipelineConfig.SetDefaults()
+
+	// Initialize pipeline manager with existing audio manager
+	pipelineMgr, err := pipeline.NewManager(a.audioMgr, pipelineConfig, a.logger.WithComponent("pipeline").Logger)
+	if err != nil {
+		return fmt.Errorf("failed to create pipeline manager: %w", err)
+	}
+	a.pipelineMgr = pipelineMgr
+
+	// Start pipeline manager with the same long-lived context
+	if err := a.pipelineMgr.Start(longLivedCtx); err != nil {
+		return fmt.Errorf("failed to start pipeline manager: %w", err)
+	}
+
+	a.logger.Info().Msg("VAD-driven pipeline system initialized successfully")
+	return nil
+}
+
+// initializeCommentarySystem initializes the commentary generation system
+func (a *Application) initializeCommentarySystem(ctx context.Context) error {
+	// Initialize LLM engine
+	llmEngine, err := llmEngine.NewLlmEngine(&a.config.LLMConfig, ctx, a.logger.WithComponent("llm").Logger)
+	if err != nil {
+		return fmt.Errorf("failed to create LLM engine: %w", err)
+	}
+	a.llmEngine = llmEngine
+
+	// Initialize template manager and load HEMA templates
+	templateManager := commentaryTemplates.NewTemplateManager()
+
+	// Register HEMA templates manually since the auto-registration uses the default manager
+	for _, tmpl := range commentaryTemplates.HEMATemplates {
+		if err := templateManager.RegisterTemplate(tmpl); err != nil {
+			return fmt.Errorf("failed to register template %s: %w", tmpl.ID, err)
+		}
+	}
+
+	// Initialize context manager
+	contextManager := commentaryContext.NewContextManager(a.logger.WithComponent("context").Logger)
+
+	// Initialize prompt builder
+	builderConfig := commentaryPrompt.DefaultBuilderConfig()
+	builderConfig.DefaultTemplate = "point_scored"
+
+	promptBuilder := commentaryPrompt.NewBuilder(
+		templateManager,
+		contextManager,
+		builderConfig,
+		a.logger.WithComponent("prompt").Logger,
+	)
+
+	// Initialize commentary generator
+	commentaryGen, err := commentaryEngine.NewCommentaryGenerator(
+		llmEngine,
+		promptBuilder,
+		&a.config.Commentary,
+		a.logger.WithComponent("commentary").Logger,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create commentary generator: %w", err)
+	}
+	a.commentaryGen = commentaryGen
+
+	// Start commentary generator
+	if err := a.commentaryGen.Start(); err != nil {
+		return fmt.Errorf("failed to start commentary generator: %w", err)
+	}
+
+	a.logger.Info().Msg("Commentary system initialized successfully")
+	return nil
+}
+
+// processCommentaryForTranscription generates commentary for a transcription result
+func (a *Application) processCommentaryForTranscription(ctx context.Context, transcription *speechTypes.TranscriptionResult) error {
+	// Create commentary request
+	request := &commentaryTypes.CommentaryRequest{
+		Input: commentaryTypes.TranscriptionInput{
+			Text:       transcription.Text,
+			Confidence: float32(transcription.Confidence),
+			Timestamp:  time.Now(),
+		},
+		MaxLatency:  2 * time.Second, // Quick response for live commentary
+		Quality:     commentaryTypes.QualityLevelBalanced,
+		CachePolicy: commentaryTypes.CachePolicyDefault,
+	}
+
+	// Add audio quality if available from metadata
+	if transcription.Metadata.AudioQuality > 0 {
+		request.Input.AudioMetrics = &commentaryTypes.AudioQuality{
+			SignalToNoise:   float32(transcription.Metadata.AudioQuality),
+			Clarity:         float32(transcription.Metadata.AudioQuality),
+			VoiceDetection:  true,
+			BackgroundNoise: 1.0 - float32(transcription.Metadata.AudioQuality),
+			Distortion:      0.2,
+		}
+	}
+
+	// Generate commentary
+	response, err := a.commentaryGen.Generate(ctx, request)
+	if err != nil {
+		return fmt.Errorf("commentary generation failed: %w", err)
+	}
+
+	if !response.Success {
+		return fmt.Errorf("commentary generation unsuccessful: %s", response.Error)
+	}
+
+	// Log and display the commentary result
+	if response.Commentary != nil {
+		a.logger.Info().
+			Str("judge_call", transcription.Text).
+			Str("commentary", response.Commentary.Text).
+			Float32("confidence", response.Commentary.Confidence).
+			Dur("generation_time", response.Latency).
+			Str("source", response.Commentary.Source).
+			Msg("Commentary generated")
+
+		// Print to stdout for easy viewing during testing
+		fmt.Printf("\n=== LIVE COMMENTARY ===\n")
+		fmt.Printf("Judge: %s\n", transcription.Text)
+		fmt.Printf("Commentary: %s\n", response.Commentary.Text)
+		fmt.Printf("Confidence: %.2f | Generation Time: %v\n", response.Commentary.Confidence, response.Latency)
+		fmt.Printf("Source: %s\n", response.Commentary.Source)
+		if response.Commentary.TemplateID != "" {
+			fmt.Printf("Template: %s\n", response.Commentary.TemplateID)
+		}
+		fmt.Printf("========================\n")
+	}
+
+	return nil
+}
+
+// pipelineLoop runs the main pipeline processing loop
+func (a *Application) pipelineLoop(ctx context.Context) error {
+	a.logger.Info().Msg("Starting VAD-driven pipeline - listening for speech...")
+
+	// Monitor pipeline errors
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case err := <-a.pipelineMgr.GetErrors():
+				if err != nil {
+					a.logger.Error().Err(err).Msg("Pipeline error")
+				}
+			}
+		}
+	}()
+
+	// Log metrics periodically
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			a.logger.Info().Msg("Shutting down pipeline...")
+			return a.shutdownPipeline()
+		case <-ticker.C:
+			// Log current metrics
+			metrics := a.pipelineMgr.GetMetrics()
+			if metrics != nil {
+				a.logger.Info().
+					Interface("metrics", metrics).
+					Str("state", a.pipelineMgr.GetState().String()).
+					Msg("Pipeline status")
+			}
+		}
+	}
+}
+
+// shutdownPipeline shuts down the pipeline system
+func (a *Application) shutdownPipeline() error {
+	a.logger.Info().Msg("Cleaning up pipeline resources...")
+
+	// Stop pipeline manager
+	if a.pipelineMgr != nil {
+		if err := a.pipelineMgr.Stop(); err != nil {
+			a.logger.Error().Err(err).Msg("Error stopping pipeline manager")
+		}
+	}
+
+	a.logger.Info().Msg("Pipeline shutdown complete")
+	return nil
 }
 
 func (a *Application) speechOnlyLoop(ctx context.Context) error {
@@ -314,6 +569,83 @@ func (a *Application) processRecentAudio(ctx context.Context) error {
 		return nil
 	}
 
+	// Apply VAD filtering and quality assessment if audio processor is available
+	if a.audioProcessor != nil {
+		hasVoice := a.audioProcessor.DetectVoiceActivity(segment.Data)
+
+		// Always assess quality metrics for logging
+		qualityMetrics := a.audioProcessor.AssessAudioQuality(segment.Data)
+		snr := 20.0 * math.Log10(qualityMetrics.RMSLevel/qualityMetrics.NoiseLevel)
+
+		if !hasVoice {
+			a.logger.Debug().
+				Dur("duration", segment.Duration).
+				Int("data_length", len(segment.Data)).
+				Float64("quality", qualityMetrics.Quality).
+				Float64("snr", snr).
+				Float64("rms_level", qualityMetrics.RMSLevel).
+				Float64("noise_level", qualityMetrics.NoiseLevel).
+				Bool("has_voice_flag", qualityMetrics.HasVoice).
+				Msg("No voice activity detected by VAD, skipping transcription")
+			return nil
+		}
+
+		// Quality metrics already assessed above for logging
+
+		// Define quality thresholds to filter out coughs, throat clearing, etc.
+		// Made more permissive to allow real speech through
+		const (
+			minQuality    = 0.1   // Minimum overall quality score (lowered from 0.3)
+			minSNR        = 3.0   // Minimum signal-to-noise ratio in dB (lowered from 8.0)
+			minRMSLevel   = 0.005 // Minimum RMS level to ensure sufficient signal (lowered from 0.02)
+			maxNoiseLevel = 0.8   // Maximum acceptable noise level (raised from 0.3)
+		)
+
+		// SNR already calculated above for logging
+
+		// Check quality thresholds
+		if qualityMetrics.Quality < minQuality {
+			a.logger.Debug().
+				Float64("quality", qualityMetrics.Quality).
+				Float64("min_quality", minQuality).
+				Msg("Audio quality too low, skipping transcription")
+			return nil
+		}
+
+		if snr < minSNR {
+			a.logger.Debug().
+				Float64("snr", snr).
+				Float64("min_snr", minSNR).
+				Msg("Signal-to-noise ratio too low, skipping transcription")
+			return nil
+		}
+
+		if qualityMetrics.RMSLevel < minRMSLevel {
+			a.logger.Debug().
+				Float64("rms_level", qualityMetrics.RMSLevel).
+				Float64("min_rms", minRMSLevel).
+				Msg("Audio signal too weak, skipping transcription")
+			return nil
+		}
+
+		if qualityMetrics.NoiseLevel > maxNoiseLevel {
+			a.logger.Debug().
+				Float64("noise_level", qualityMetrics.NoiseLevel).
+				Float64("max_noise", maxNoiseLevel).
+				Msg("Noise level too high, skipping transcription")
+			return nil
+		}
+
+		a.logger.Debug().
+			Dur("duration", segment.Duration).
+			Int("data_length", len(segment.Data)).
+			Float64("quality", qualityMetrics.Quality).
+			Float64("snr", snr).
+			Float64("rms_level", qualityMetrics.RMSLevel).
+			Float64("noise_level", qualityMetrics.NoiseLevel).
+			Msg("Audio passed quality checks, proceeding with transcription")
+	}
+
 	// Transcribe the audio
 	result, err := a.speechMgr.TranscribeAudio(ctx, segment)
 	if err != nil {
@@ -327,6 +659,13 @@ func (a *Application) processRecentAudio(ctx context.Context) error {
 			Float64("confidence", result.Confidence).
 			Dur("duration", result.Duration).
 			Msg("Transcription result")
+
+		// Generate commentary if commentary system is enabled
+		if a.commentaryEnabled {
+			if err := a.processCommentaryForTranscription(ctx, result); err != nil {
+				a.logger.Error().Err(err).Msg("Failed to generate commentary")
+			}
+		}
 	}
 
 	return nil
@@ -335,10 +674,31 @@ func (a *Application) processRecentAudio(ctx context.Context) error {
 func (a *Application) shutdownSpeechOnly() error {
 	a.logger.Info().Msg("Cleaning up speech recognition resources...")
 
+	// Stop commentary generator
+	if a.commentaryEnabled && a.commentaryGen != nil {
+		if err := a.commentaryGen.Stop(); err != nil {
+			a.logger.Error().Err(err).Msg("Error stopping commentary generator")
+		}
+	}
+
+	// Stop LLM engine
+	if a.llmEngine != nil {
+		if err := a.llmEngine.Close(); err != nil {
+			a.logger.Error().Err(err).Msg("Error closing LLM engine")
+		}
+	}
+
 	// Stop speech manager
 	if a.speechMgr != nil {
 		if err := a.speechMgr.Stop(); err != nil {
 			a.logger.Error().Err(err).Msg("Error stopping speech manager")
+		}
+	}
+
+	// Stop audio processor
+	if a.audioProcessor != nil {
+		if err := a.audioProcessor.Close(); err != nil {
+			a.logger.Error().Err(err).Msg("Error closing audio processor")
 		}
 	}
 
@@ -356,6 +716,9 @@ func (a *Application) shutdownSpeechOnly() error {
 func (a *Application) shutdown() error {
 	if a.audioFile != "" || a.speechOnly {
 		return a.shutdownSpeechOnly()
+	}
+	if a.pipelineMode {
+		return a.shutdownPipeline()
 	}
 	a.logger.Info().Msg("Cleaning up resources...")
 

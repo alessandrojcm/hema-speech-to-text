@@ -320,7 +320,7 @@ func (w *worker) processRequest(request *generationRequest) *types.CommentaryRes
 		Temperature: 0.7,
 		TopP:        0.9,
 		TopK:        40,
-		Timeout:     2 * time.Second,
+		Timeout:     15 * time.Second, // Increased from 2s to allow for LLM generation
 	}
 
 	llmResp, err := w.generator.llmEngine.Generate(llmReq)

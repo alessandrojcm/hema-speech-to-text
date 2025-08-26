@@ -44,7 +44,7 @@ audio:
     preallocate_size: 0 # Pre-allocate buffer size (0=auto)
 
   processing:
-    enable_preprocessing: true # Enable audio preprocessing
+    enable_preprocessing: false # Enable audio preprocessing
     normalization: true # Enable audio normalization
     highpass_filter: 80.0 # High-pass filter frequency (Hz)
     lowpass_filter: 8000.0 # Low-pass filter frequency (Hz)

@@ -23,9 +23,9 @@ scene:
 
 audio:
   device:
-    name: "MacBook Pro Microphone" # Target audio device
+    name: "Razer Barracuda X" # Target audio device
     id: 1 # Use built-in microphone
-    sample_rate: 44100 # Sample rate in Hz (match built-in mic)
+    sample_rate: 16000 # Sample rate in Hz (16kHz optimal for speech processing and WebRTC VAD)
     channels: 1 # Number of channels (mono for built-in mic)
     bit_depth: 16 # Bit depth
     frames_per_buffer: 1024 # Buffer size in frames
@@ -42,10 +42,18 @@ audio:
 
   processing:
     enable_preprocessing: true # Enable audio preprocessing
-    normalization: true # Enable normalization
+    normalization: false # Enable normalization
     highpass_filter: 80.0 # High-pass filter frequency (Hz)
     lowpass_filter: 8000.0 # Low-pass filter frequency (Hz)
-    vad_threshold: 0.1 # Voice activity detection threshold
+    vad_threshold: 0.01 # Voice activity detection threshold (lowered from 0.1)
+    # Library selection
+    resampler_type: "gosamplerate"
+    vad_type: "webrtc"
+    wav_exporter_type: "goaudio"
+    fft_type: "gonum"
+    # Library-specific settings
+    resampler_quality: 0 # Best quality
+    vad_mode: 1 # Less aggressive (changed from 3)
 
   extraction:
     default_duration: "10s" # Default extraction duration
@@ -99,6 +107,55 @@ speech:
     timeout_duration: "30s"
     memory_limit: 1073741824 # 1GB
     metal_optimization: true
+
+llm:
+  endpoint: "http://localhost:8080"
+  model_id: "mlx-community/Qwen3-4B-Instruct-2507-8bit"
+  timeout: "30s"
+
+commentary:
+  default_template: "point_scored"
+  max_latency: "20s"
+  default_quality: "balanced"
+  concurrent_requests: 3
+  min_confidence: 0.6
+  enable_fallback: true
+  fallback_threshold: 0.6
+  max_retries: 2
+  max_output_length: 200
+  min_output_length: 10
+  enable_profanity_filter: true
+  enable_cache: true
+  default_cache_policy: "default"
+  enable_metrics: true
+  enable_logging: true
+  log_level: "info"
+
+pipeline:
+  speech:
+    whisper:
+      model_size: "base"
+      language: "en"
+      thread_count: 2
+    performance:
+      max_concurrent: 2
+      cache_size: 10
+      timeout_duration: "10s"
+  vad:
+    min_speech_duration_ms: 500
+    max_silence_duration_ms: 1000
+    vad_mode: 2
+    buffer_before_ms: 100
+    buffer_after_ms: 200
+  pipeline:
+    max_concurrent_requests: 3
+    processing_timeout: "30s"
+    segment_buffer_size: 50
+    max_retries: 3
+    retry_delay: "1s"
+    fallback_enabled: true
+    metrics_enabled: true
+    metrics_interval: "10s"
 
 logging:
   level: "debug"

@@ -63,6 +63,10 @@ Judge: red shallow target, blue afterflow deep target.
 Explanation: Red hits with a shallow but blue hits right back with a deep target, so blue gets 3 points.
 </example>
 
+You will output the explanation as a singular string with ONLY the judge call explanation. For example,
+if the input was: red shallow target, blue afterflow deep target. Your output will be:
+Red hits with a shallow but blue hits right back with a deep target, so blue gets 3 points.
+
 Now transcribe the judge call below
 `
 
@@ -151,52 +155,44 @@ func (e *ModelEngine) generateText(request types.GenerationRequest) (*types.Gene
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	// Generate with timeout
-	resultChan := make(chan string, 1)
-	errChan := make(chan error, 1)
+	// Create a request-specific context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), request.Timeout)
+	defer cancel()
 
-	go func() {
-		response, err := e.client.Chat.Completions.New(e.ctx, openai.ChatCompletionNewParams{
-			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage(systemPrompt),
-				openai.UserMessage(request.Prompt),
-			},
-			MaxCompletionTokens: param.NewOpt[int64](int64(request.MaxTokens)),
-			Temperature:         param.NewOpt[float64](float64(request.Temperature)),
-			Model:               e.config.ModelID,
-			TopP:                param.NewOpt[float64](float64(request.TopP)),
-		}, option.WithRequestTimeout(request.Timeout))
-		if err != nil {
-			errChan <- err
-			return
-		}
-		resultChan <- response.Choices[0].Message.Content
-	}()
-
-	select {
-	case text := <-resultChan:
-		// Process successful generation
-		processingTime := time.Since(startTime)
-
-		return &types.GenerationResponse{
-			Text:         text,
-			TokenCount:   len(text) / 4, // Rough estimate, 4 chars per token
-			FinishReason: "stop",
-			Latency:      processingTime,
-			Metadata: types.GenerationMetadata{
-				ModelName:        "Qwen3",
-				TokensPerSecond:  float64(len(text)/4) / processingTime.Seconds(),
-				PromptTokens:     len(request.Prompt) / 4, // Rough estimate
-				CompletionTokens: len(text) / 4,           // Rough estimate
-				TotalTokens:      (len(request.Prompt) + len(text)) / 4,
-				ProcessingTime:   processingTime,
-			},
-			Timestamp: time.Now(),
-		}, nil
-
-	case err := <-errChan:
+	// Generate with proper context
+	response, err := e.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(systemPrompt),
+			openai.UserMessage(request.Prompt),
+		},
+		MaxCompletionTokens: param.NewOpt[int64](int64(request.MaxTokens)),
+		Temperature:         param.NewOpt[float64](float64(request.Temperature)),
+		Model:               e.config.ModelID,
+		TopP:                param.NewOpt[float64](float64(request.TopP)),
+	})
+	if err != nil {
 		return nil, err
 	}
+
+	// Process successful generation
+	processingTime := time.Since(startTime)
+	text := response.Choices[0].Message.Content
+
+	return &types.GenerationResponse{
+		Text:         text,
+		TokenCount:   len(text) / 4, // Rough estimate, 4 chars per token
+		FinishReason: "stop",
+		Latency:      processingTime,
+		Metadata: types.GenerationMetadata{
+			ModelName:        "Qwen3",
+			TokensPerSecond:  float64(len(text)/4) / processingTime.Seconds(),
+			PromptTokens:     len(request.Prompt) / 4, // Rough estimate
+			CompletionTokens: len(text) / 4,           // Rough estimate
+			TotalTokens:      (len(request.Prompt) + len(text)) / 4,
+			ProcessingTime:   processingTime,
+		},
+		Timestamp: time.Now(),
+	}, nil
 }
 
 // GetStatus returns the current status of the engine

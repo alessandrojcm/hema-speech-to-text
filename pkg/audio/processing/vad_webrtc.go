@@ -17,9 +17,9 @@ type WebRTCVAD struct {
 
 // NewWebRTCVAD creates a new WebRTC VAD detector
 func NewWebRTCVAD(sampleRate int, mode int) (*WebRTCVAD, error) {
-	// Validate sample rate (WebRTC VAD supports 8000, 16000, 32000, 48000 Hz)
-	if sampleRate != 8000 && sampleRate != 16000 && sampleRate != 32000 && sampleRate != 48000 {
-		return nil, fmt.Errorf("unsupported sample rate: %d (supported: 8000, 16000, 32000, 48000)", sampleRate)
+	// Validate sample rate (WebRTC VAD supports 8000, 16000, 32000 Hz only)
+	if sampleRate != 8000 && sampleRate != 16000 && sampleRate != 32000 {
+		return nil, fmt.Errorf("unsupported sample rate: %d (supported: 8000, 16000, 32000)", sampleRate)
 	}
 
 	// Validate mode (0-3, where 3 is most aggressive)
@@ -54,6 +54,7 @@ func NewWebRTCVAD(sampleRate int, mode int) (*WebRTCVAD, error) {
 
 // DetectVoice detects voice activity in the given samples
 func (v *WebRTCVAD) DetectVoice(samples []float32) bool {
+	// We'll add basic logging to avoid import cycle issues
 	if v.detector == nil || len(samples) == 0 {
 		return false
 	}
@@ -62,7 +63,6 @@ func (v *WebRTCVAD) DetectVoice(samples []float32) bool {
 	// - 8000 Hz: 80, 160, or 240 samples (10ms, 20ms, 30ms)
 	// - 16000 Hz: 160, 320, or 480 samples (10ms, 20ms, 30ms)
 	// - 32000 Hz: 320, 640, or 960 samples (10ms, 20ms, 30ms)
-	// - 48000 Hz: 480, 960, or 1440 samples (10ms, 20ms, 30ms)
 
 	// Calculate frame size for 20ms (most common)
 	frameSize := v.sampleRate / 50 // 20ms frame
@@ -108,12 +108,12 @@ func (v *WebRTCVAD) DetectVoice(samples []float32) bool {
 			continue // Skip empty chunks
 		}
 		audioBytes := make([]byte, len(int16Samples)*2)
-		for i, sample := range int16Samples {
-			audioBytes[i*2] = byte(sample)
-			audioBytes[i*2+1] = byte(sample >> 8)
+		for idx, sample := range int16Samples {
+			audioBytes[idx*2] = byte(sample)
+			audioBytes[idx*2+1] = byte(sample >> 8)
 		}
 
-		// Process with WebRTC VAD
+		// Process with WebRTC VAD - THIS IS WHERE FREEZING MIGHT OCCUR
 		active, err := webrtcvad.Process(v.detector, v.sampleRate, audioBytes, len(int16Samples))
 		if err != nil {
 			// If processing fails, fall back to simple energy-based detection
@@ -124,6 +124,7 @@ func (v *WebRTCVAD) DetectVoice(samples []float32) bool {
 			voiceDetected = true
 			break // Early exit if voice is detected in any chunk
 		}
+
 	}
 
 	return voiceDetected
@@ -197,8 +198,7 @@ func (v *WebRTCVAD) IsValidFrameLength(frameLength int) bool {
 		return frameLength == 160 || frameLength == 320 || frameLength == 480
 	case 32000:
 		return frameLength == 320 || frameLength == 640 || frameLength == 960
-	case 48000:
-		return frameLength == 480 || frameLength == 960 || frameLength == 1440
+
 	default:
 		return false
 	}
@@ -213,8 +213,7 @@ func (v *WebRTCVAD) GetValidFrameLengths() []int {
 		return []int{160, 320, 480} // 10ms, 20ms, 30ms
 	case 32000:
 		return []int{320, 640, 960} // 10ms, 20ms, 30ms
-	case 48000:
-		return []int{480, 960, 1440} // 10ms, 20ms, 30ms
+
 	default:
 		return nil
 	}
@@ -248,9 +247,9 @@ func (v *WebRTCVAD) ProcessFrame(samples []float32) (bool, error) {
 		return false, fmt.Errorf("empty audio frame")
 	}
 	audioBytes := make([]byte, len(int16Samples)*2)
-	for i, sample := range int16Samples {
-		audioBytes[i*2] = byte(sample)
-		audioBytes[i*2+1] = byte(sample >> 8)
+	for idx, sample := range int16Samples {
+		audioBytes[idx*2] = byte(sample)
+		audioBytes[idx*2+1] = byte(sample >> 8)
 	}
 
 	return webrtcvad.Process(v.detector, v.sampleRate, audioBytes, len(int16Samples))

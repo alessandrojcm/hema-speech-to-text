@@ -1,0 +1,101 @@
+# Pipeline Mode Configuration Example
+
+# OBS Configuration (can be empty for pipeline-only mode)
+obs:
+  host: "localhost"
+  port: 4455
+  password: ""
+
+# Audio Configuration for Pipeline
+audio:
+  device:
+    sample_rate: 16000
+    channels: 1
+    bit_depth: 16
+    frames_per_buffer: 1024
+  buffer:
+    duration: "60s"
+    segment_size: "1s"
+  processing:
+    vad_type: "webrtc"
+    enable_preprocessing: true
+    normalization: true
+  extraction:
+    default_duration: "5s"
+    max_concurrent: 2
+
+# Speech Recognition Configuration
+speech:
+  whisper:
+    model_path: "./models/ggml-base.bin"
+    model_size: "base"
+    language: "en"
+    thread_count: 2
+  vocabulary:
+    hema_vocab_path: "./config/hema_vocabulary.txt"
+    context_switching: true
+  processing:
+    target_sample_rate: 16000
+    segment_duration: "10s"
+    normalization: true
+    vad_enabled: true
+  performance:
+    max_concurrent: 2
+    cache_size: 10
+    cache_ttl: "1m"
+    timeout_duration: "10s"
+
+# Pipeline System Configuration
+pipeline:
+  # Audio settings for pipeline (override main audio)
+  audio:
+    device:
+      sample_rate: 16000
+      channels: 1
+      bit_depth: 16
+    buffer:
+      duration: "60s"
+      segment_size: "1s"
+    processing:
+      vad_type: "webrtc"
+    extraction:
+      default_duration: "5s"
+      max_concurrent: 2
+
+  # Speech settings for pipeline (override main speech)
+  speech:
+    whisper:
+      model_size: "base"
+      language: "en"
+      thread_count: 2
+    performance:
+      max_concurrent: 2
+      cache_size: 10
+      timeout_duration: "10s"
+
+  # VAD Configuration
+  vad:
+    min_speech_duration_ms: 500    # 500ms minimum speech
+    max_silence_duration_ms: 1000  # 1s max silence
+    vad_mode: 2                    # Balanced WebRTC VAD mode (0-3)
+    buffer_before_ms: 100          # 100ms before speech
+    buffer_after_ms: 200           # 200ms after speech
+
+  # Pipeline Processing Settings
+  pipeline:
+    max_concurrent_requests: 3
+    processing_timeout: "30s"
+    segment_buffer_size: 50
+    max_retries: 3
+    retry_delay: "1s"
+    fallback_enabled: true
+    metrics_enabled: true
+    metrics_interval: "10s"
+
+# LLM Configuration (optional for pipeline mode)
+openaiendpoint: "http://localhost:8000"
+
+# Logging
+logging:
+  level: "info"
+  format: "json"

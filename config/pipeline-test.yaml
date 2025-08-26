@@ -1,0 +1,38 @@
+# Minimal Pipeline Configuration for Testing
+logging:
+  level: "info"
+  format: "json"
+
+# Minimal OBS config (required but not used in pipeline mode)
+obs:
+  host: "localhost"
+  port: 4455
+  password: ""
+
+# Basic audio config using defaults
+audio:
+  device:
+    sample_rate: 16000
+    channels: 1
+    bit_depth: 16
+  buffer:
+    duration: "60s"
+    segment_size: "1s"
+  processing:
+    vad_type: "webrtc"
+  extraction:
+    default_duration: "5s"
+    max_concurrent: 2
+
+# Basic speech config
+speech:
+  whisper:
+    model_path: "./models/ggml-base.bin"
+    model_size: "base"
+    language: "en"
+  performance:
+    max_concurrent: 2
+    timeout_duration: "10s"
+
+# LLM endpoint (required by config validation)
+openaiendpoint: "http://localhost:8000"

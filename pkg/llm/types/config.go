@@ -4,7 +4,7 @@ import "time"
 
 type LLMConfig struct {
 	Endpoint      string        `mapstructure:"endpoint"`
-	ModelID       string        `mapstructure:"model_path"`     // ModelID
+	ModelID       string        `mapstructure:"model_id"`       // ModelID
 	ContextSize   int           `mapstructure:"context_size"`   // Default: 2048 for small models
 	BatchSize     int           `mapstructure:"batch_size"`     // Batch size for processing
 	Threads       int           `mapstructure:"threads"`        // CPU threads
@@ -19,7 +19,7 @@ type LLMConfig struct {
 
 func DefaultLLMConfig() *LLMConfig {
 	return &LLMConfig{
-		ModelID:       "mlx-community/Qwen3-4B-Instruct-2507-DDWQ",
+		ModelID:       "mlx-community/Qwen3-4B-Instruct-2507-8bit",
 		Endpoint:      "http://localhost:8080",
 		ContextSize:   2048,
 		BatchSize:     512,

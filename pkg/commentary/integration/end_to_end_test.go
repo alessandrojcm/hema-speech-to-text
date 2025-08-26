@@ -222,13 +222,18 @@ func TestCommentaryWithActualLLM(t *testing.T) {
 			expectedSource: "llm",
 			expectedMinLen: 25,
 		},
+		{
+			name:           "Point scored",
+			transcription:  "Deep target blue",
+			confidence:     0.85,
+			expectedSource: "llm",
+			expectedMinLen: 15,
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Allow generous timeout for this subtest
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
 
 			input := types.TranscriptionInput{
 				Text:       tc.transcription,
@@ -245,7 +250,8 @@ func TestCommentaryWithActualLLM(t *testing.T) {
 
 			t.Logf("Generating commentary for: %s", tc.transcription)
 			startTime := time.Now()
-
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
 			response, err := generator.Generate(ctx, &request)
 
 			duration := time.Since(startTime)

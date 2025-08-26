@@ -578,3 +578,25 @@ func (am *AudioManager) UpdateConfiguration(config types.AudioConfig) error {
 
 	return nil
 }
+
+// GetProcessor returns the audio processor for direct access to VAD and other processing features
+func (am *AudioManager) GetProcessor() *processing.AudioProcessor {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return am.processor
+}
+
+// GetRecentAudioSamples extracts recent audio samples for real-time analysis
+func (am *AudioManager) GetRecentAudioSamples(duration time.Duration) ([]float32, error) {
+	if !am.running {
+		return nil, types.ErrNotRunning
+	}
+
+	// Extract recent audio from the ring buffer
+	segment, err := am.ringBuffer.Extract(duration, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract recent samples: %w", err)
+	}
+
+	return segment.Data, nil
+}
