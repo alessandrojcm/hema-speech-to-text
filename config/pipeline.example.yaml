@@ -23,6 +23,13 @@ audio:
   extraction:
     default_duration: "5s"
     max_concurrent: 2
+  capture:
+    # Async processing configuration (always enabled)
+    async_processing:
+      channel_buffer_size: 20
+      max_processing_lag_ms: 500
+      drop_threshold: 10
+      monitoring_interval_ms: 1000
 
 # Speech Recognition Configuration
 speech:

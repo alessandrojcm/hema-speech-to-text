@@ -67,6 +67,14 @@ audio:
     output_channels: 1 # Output channels (mono for speech recognition)
     timestamp_precision: "10ms" # Timestamp precision
 
+  capture:
+    # Async processing configuration (always enabled)
+    async_processing:
+      channel_buffer_size: 20 # Channel buffer size (~400ms at 50ms frames)
+      max_processing_lag_ms: 500 # Maximum processing lag threshold
+      drop_threshold: 10 # Queue depth to enable fast path processing
+      monitoring_interval_ms: 1000 # Metrics reporting interval
+
 logging:
   level: "info" # Log level: debug, info, warn, error
   format: "json" # Log format: json, console
