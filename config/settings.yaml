@@ -119,6 +119,8 @@ commentary:
   default_quality: "balanced"
   concurrent_requests: 3
   min_confidence: 0.6
+  quality_threshold: 0.2  # Lowered from default 0.3
+  relevance_threshold: 0.15  # Lowered from default 0.25
   enable_fallback: true
   fallback_threshold: 0.6
   max_retries: 2
