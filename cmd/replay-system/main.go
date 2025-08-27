@@ -21,6 +21,7 @@ import (
 	"github.com/your-org/hema-replay-system/internal/text"
 	"github.com/your-org/hema-replay-system/pkg/audio"
 	"github.com/your-org/hema-replay-system/pkg/audio/capture"
+	"github.com/your-org/hema-replay-system/pkg/audio/debug"
 	"github.com/your-org/hema-replay-system/pkg/audio/processing"
 	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
 	commentaryContext "github.com/your-org/hema-replay-system/pkg/commentary/context"
@@ -50,6 +51,11 @@ type Application struct {
 	audioFile      string
 	pipelineMode   bool
 
+	// Debug settings
+	debugAudio     bool
+	debugOutputDir string
+	vadDebug       bool
+
 	// Commentary system components
 	llmEngine         *llmEngine.ModelEngine
 	commentaryGen     *commentaryEngine.CommentaryGenerator
@@ -62,20 +68,26 @@ func main() {
 	var audioFile string
 	var listDevices bool
 	var pipelineMode bool
+	var debugAudio bool
+	var debugOutputDir string
+	var vadDebug bool
 	flag.StringVar(&configPath, "config", "", "Path to configuration file")
 	flag.BoolVar(&speechOnly, "speech-only", false, "Run only speech recognition system (for testing)")
 	flag.StringVar(&audioFile, "audio-file", "", "Process a single audio file and exit (for testing)")
 	flag.BoolVar(&listDevices, "list-devices", false, "List available audio devices")
 	flag.BoolVar(&pipelineMode, "pipeline", false, "Run the complete VAD-driven pipeline system")
+	flag.BoolVar(&debugAudio, "debug-audio", false, "Save audio segments for debugging")
+	flag.StringVar(&debugOutputDir, "debug-output", "./debug_audio", "Directory for debug audio files")
+	flag.BoolVar(&vadDebug, "vad-debug", false, "Enable detailed VAD logging")
 	flag.Parse()
 
-	if err := run(configPath, speechOnly, audioFile, listDevices, pipelineMode); err != nil {
+	if err := run(configPath, speechOnly, audioFile, listDevices, pipelineMode, debugAudio, debugOutputDir, vadDebug); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath string, speechOnly bool, audioFile string, listDevices bool, pipelineMode bool) error {
+func run(configPath string, speechOnly bool, audioFile string, listDevices bool, pipelineMode bool, debugAudio bool, debugOutputDir string, vadDebug bool) error {
 	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -108,11 +120,14 @@ func run(configPath string, speechOnly bool, audioFile string, listDevices bool,
 
 	// Create application
 	app := &Application{
-		config:       cfg,
-		logger:       log,
-		speechOnly:   speechOnly,
-		audioFile:    audioFile,
-		pipelineMode: pipelineMode,
+		config:         cfg,
+		logger:         log,
+		speechOnly:     speechOnly,
+		audioFile:      audioFile,
+		pipelineMode:   pipelineMode,
+		debugAudio:     debugAudio,
+		debugOutputDir: debugOutputDir,
+		vadDebug:       vadDebug,
 	}
 
 	// Initialize components
@@ -216,6 +231,13 @@ func (a *Application) initializeSpeechOnly(ctx context.Context) error {
 	// Start speech recognition with timeout context (initialization only)
 	if err := a.speechMgr.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start speech manager: %w", err)
+	}
+
+	// Setup debug saver if enabled
+	if a.debugAudio {
+		debugSaver := debug.NewSegmentSaver(a.debugOutputDir, true, a.logger.WithComponent("debug_saver").Logger)
+		a.speechMgr.SetDebugSaver(debugSaver)
+		a.logger.Info().Str("output_dir", a.debugOutputDir).Msg("Debug audio saving enabled")
 	}
 
 	// Initialize commentary system
@@ -766,6 +788,13 @@ func (a *Application) initializeAudioFileMode(ctx context.Context) error {
 	// Start speech recognition
 	if err := a.speechMgr.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start speech manager: %w", err)
+	}
+
+	// Setup debug saver if enabled
+	if a.debugAudio {
+		debugSaver := debug.NewSegmentSaver(a.debugOutputDir, true, a.logger.WithComponent("debug_saver").Logger)
+		a.speechMgr.SetDebugSaver(debugSaver)
+		a.logger.Info().Str("output_dir", a.debugOutputDir).Msg("Debug audio saving enabled")
 	}
 
 	a.logger.Info().Msg("Audio file processing mode initialized successfully")

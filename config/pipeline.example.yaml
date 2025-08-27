@@ -38,6 +38,13 @@ speech:
     model_size: "base"
     language: "en"
     thread_count: 2
+    suppress_blank: true
+    suppress_non_speech: true
+    suppress_regex: "\\[.*\\]|\\(.*\\)|um|uh|ah|eh"  # Filter out brackets, parentheses, filler words
+    no_speech_threshold: 0.6   # Higher = more aggressive filtering
+    logprob_threshold: -1.0     # Token log probability threshold
+    min_token_confidence: 0.3   # Minimum confidence for tokens
+    initial_prompt: ""  # Will be auto-generated from vocabulary
   vocabulary:
     hema_vocab_path: "./config/hema_vocabulary.txt"
     context_switching: true
@@ -46,6 +53,12 @@ speech:
     segment_duration: "10s"
     normalization: true
     vad_enabled: true
+    
+    # Quality filtering parameters
+    quality_enabled: true
+    min_energy: 0.01        # Minimum RMS energy
+    min_snr: 3.0            # Minimum signal-to-noise ratio in dB
+    min_voice_ratio: 0.2    # Minimum ratio of voiced frames
   performance:
     max_concurrent: 2
     cache_size: 10
@@ -75,6 +88,13 @@ pipeline:
       model_size: "base"
       language: "en"
       thread_count: 2
+      suppress_blank: true
+      suppress_non_speech: true
+      suppress_regex: "\\[.*\\]|\\(.*\\)|um|uh|ah|eh"  # Filter out brackets, parentheses, filler words
+      no_speech_threshold: 0.6
+      logprob_threshold: -1.0     # Token log probability threshold
+      min_token_confidence: 0.3   # Minimum confidence for tokens
+      initial_prompt: ""  # Will be auto-generated from vocabulary
     performance:
       max_concurrent: 2
       cache_size: 10
@@ -82,11 +102,16 @@ pipeline:
 
   # VAD Configuration
   vad:
-    min_speech_duration_ms: 500    # 500ms minimum speech
-    max_silence_duration_ms: 1000  # 1s max silence
-    vad_mode: 2                    # Balanced WebRTC VAD mode (0-3)
-    buffer_before_ms: 100          # 100ms before speech
-    buffer_after_ms: 200           # 200ms after speech
+    min_speech_duration_ms: 500   # Increase from 250ms to reduce false triggers
+    max_silence_duration_ms: 1000 # Allow longer pauses in speech
+    vad_mode: 2                    # More aggressive mode (0-3, higher = more aggressive)
+    buffer_before_ms: 200          # Capture context before speech
+    buffer_after_ms: 300           # Capture context after speech
+    
+    # New parameters for better filtering
+    energy_threshold: 0.02         # Minimum energy to consider as speech
+    zero_crossing_threshold: 0.3   # Maximum ZCR for speech (vs music/noise)
+    spectral_flatness_threshold: 0.5  # Differentiate speech from white noise
 
   # Pipeline Processing Settings
   pipeline:

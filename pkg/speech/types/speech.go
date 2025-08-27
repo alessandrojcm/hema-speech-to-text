@@ -116,4 +116,17 @@ type WhisperParams struct {
 	BeamSize       int
 	MaxTokens      int
 	WordTimestamps bool
+
+	// Noise suppression and filtering
+	SuppressBlank     bool   `mapstructure:"suppress_blank"`
+	SuppressNonSpeech bool   `mapstructure:"suppress_non_speech"`
+	SuppressRegex     string `mapstructure:"suppress_regex"`
+	InitialPrompt     string `mapstructure:"initial_prompt"`
+
+	// Quality thresholds
+	NoSpeechThreshold float32 `mapstructure:"no_speech_threshold"`
+	LogProbThreshold  float32 `mapstructure:"logprob_threshold"`
+
+	// Token filtering
+	MinTokenConfidence float32 `mapstructure:"min_token_confidence"`
 }

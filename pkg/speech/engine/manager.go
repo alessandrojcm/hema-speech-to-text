@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/your-org/hema-replay-system/pkg/audio/debug"
 	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
 	"github.com/your-org/hema-replay-system/pkg/speech/internal"
 	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
@@ -87,6 +88,13 @@ func NewSpeechManager(config speechTypes.SpeechConfig, logger zerolog.Logger) (*
 		activeTasks:  make(map[string]*TranscriptionTask),
 		logger:       logger.With().Str("component", "speech_manager").Logger(),
 	}, nil
+}
+
+// SetDebugSaver sets the debug saver for the speech processing pipeline
+func (sm *SpeechManager) SetDebugSaver(debugSaver *debug.SegmentSaver) {
+	if sm.pipeline != nil {
+		sm.pipeline.SetDebugSaver(debugSaver)
+	}
 }
 
 // Start initializes the speech recognition system

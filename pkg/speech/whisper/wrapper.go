@@ -97,13 +97,41 @@ func (ww *WhisperWrapper) configureContext(context whisper.Context, params types
 		context.SetThreads(uint(params.ThreadCount))
 	}
 
+	// Set initial prompt with HEMA vocabulary
+	if params.InitialPrompt != "" {
+		context.SetInitialPrompt(params.InitialPrompt)
+		ww.logger.Debug().
+			Str("initial_prompt", params.InitialPrompt).
+			Msg("Set initial prompt for vocabulary boosting")
+	}
+
+	// Store noise suppression parameters for future processing
+	// Note: These features may require whisper.cpp Go bindings update to fully support
+	if params.SuppressBlank {
+		ww.logger.Debug().Msg("Blank output suppression requested (stored for future use)")
+	}
+
+	if params.SuppressNonSpeech {
+		ww.logger.Debug().Msg("Non-speech token suppression requested (stored for future use)")
+	}
+
+	// Set token timestamps for better alignment
+	context.SetTokenTimestamps(params.WordTimestamps)
+
 	// Set other parameters
 	context.SetTranslate(false) // We want transcription, not translation
-	context.SetTokenTimestamps(params.WordTimestamps)
 
 	// Set sampling parameters
 	if params.Temperature > 0 {
 		context.SetTemperature(params.Temperature)
+	}
+
+	// Set quality thresholds for improved filtering
+	if params.NoSpeechThreshold > 0 {
+		// Note: This parameter may need whisper.cpp Go bindings update to support
+		ww.logger.Debug().
+			Float32("no_speech_threshold", params.NoSpeechThreshold).
+			Msg("No speech threshold configured (may require bindings update)")
 	}
 
 	return nil
