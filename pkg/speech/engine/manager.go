@@ -11,7 +11,6 @@ import (
 	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
 	"github.com/your-org/hema-replay-system/pkg/speech/internal"
 	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
-	"github.com/your-org/hema-replay-system/pkg/speech/vocabulary"
 	"github.com/your-org/hema-replay-system/pkg/speech/whisper"
 	// ❌ preprocessing removed - using pkg/audio/processing instead
 )
@@ -20,7 +19,6 @@ import (
 type SpeechManager struct {
 	config       speechTypes.SpeechConfig
 	modelManager *whisper.ModelManager
-	vocabulary   *vocabulary.HEMAVocabulary
 	// ❌ preprocessor removed - using pkg/audio/processing instead
 	cache    *ResultCache
 	pipeline *ProcessingPipeline
@@ -57,13 +55,6 @@ type TranscriptionTask struct {
 func NewSpeechManager(config speechTypes.SpeechConfig, logger zerolog.Logger) (*SpeechManager, error) {
 	modelManager := whisper.NewModelManager(config.Whisper, logger)
 
-	vocab := vocabulary.NewHEMAVocabulary(logger)
-	if config.Vocabulary.HEMAVocabPath != "" {
-		if err := vocab.LoadFromFile(config.Vocabulary.HEMAVocabPath); err != nil {
-			return nil, fmt.Errorf("failed to load HEMA vocabulary: %w", err)
-		}
-	}
-
 	cache := NewResultCache(config.Performance.CacheSize, config.Performance.CacheTTL, logger)
 	pipeline, err := NewProcessingPipeline(config, logger)
 	if err != nil {
@@ -75,12 +66,10 @@ func NewSpeechManager(config speechTypes.SpeechConfig, logger zerolog.Logger) (*
 
 	// Set up pipeline dependencies
 	pipeline.SetModelManager(modelManager)
-	pipeline.SetVocabulary(vocab)
 
 	return &SpeechManager{
 		config:       config,
 		modelManager: modelManager,
-		vocabulary:   vocab,
 		cache:        cache,
 		pipeline:     pipeline,
 		metrics:      metrics,
@@ -350,7 +339,6 @@ func (sm *SpeechManager) GetStats() map[string]interface{} {
 		"is_running":          sm.running,
 		"loaded_models":       sm.modelManager.GetLoadedModels(),
 		"cache_stats":         sm.cache.GetStats(),
-		"vocabulary_stats":    sm.vocabulary.GetStats(),
 	}
 }
 

@@ -75,22 +75,7 @@ speech:
     beam_size: 5
     word_timestamps: true
 
-  vocabulary:
-    hema_vocab_path: "./config/hema_vocabulary.txt"
-    boost_weights:
-      "longsword": 2.0
-      "riposte": 1.8
-      "bind": 1.5
-      "halt": 2.5
-      "point": 2.0
-    context_switching: true
-    validation_rules:
-      - "validate_hema_terms"
-      - "check_phonetic_similarity"
-    custom_terms:
-      - "nachreisen"
-      - "zwerchhau"
-      - "zornhau"
+
 
   processing:
     target_sample_rate: 16000

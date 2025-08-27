@@ -44,10 +44,8 @@ speech:
     no_speech_threshold: 0.6   # Higher = more aggressive filtering
     logprob_threshold: -1.0     # Token log probability threshold
     min_token_confidence: 0.3   # Minimum confidence for tokens
-    initial_prompt: ""  # Will be auto-generated from vocabulary
-  vocabulary:
-    hema_vocab_path: "./config/hema_vocabulary.txt"
-    context_switching: true
+      initial_prompt: ""  # Initial prompt for whisper (can be used for vocabulary hints)
+
   processing:
     target_sample_rate: 16000
     segment_duration: "10s"
@@ -94,7 +92,7 @@ pipeline:
       no_speech_threshold: 0.6
       logprob_threshold: -1.0     # Token log probability threshold
       min_token_confidence: 0.3   # Minimum confidence for tokens
-      initial_prompt: ""  # Will be auto-generated from vocabulary
+    initial_prompt: ""  # Initial prompt for whisper (can be used for vocabulary hints)
     performance:
       max_concurrent: 2
       cache_size: 10

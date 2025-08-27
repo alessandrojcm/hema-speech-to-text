@@ -30,9 +30,7 @@ func TestSpeechRecognitionIntegration(t *testing.T) {
 			UseGPU:      true,
 			ThreadCount: 2,
 		},
-		Vocabulary: types.VocabularyConfig{
-			HEMAVocabPath: "./testdata/hema_vocab.txt",
-		},
+
 		Performance: types.PerformanceConfig{
 			MaxConcurrent:   2,
 			TimeoutDuration: 30 * time.Second,

@@ -92,13 +92,7 @@ logging:
 						BeamSize:       5,
 						WordTimestamps: true,
 					},
-					Vocabulary: speechTypes.VocabularyConfig{
-						HEMAVocabPath:    "./config/hema_vocabulary.txt",
-						BoostWeights:     nil,
-						ContextSwitching: true,
-						ValidationRules:  nil,
-						CustomTerms:      nil,
-					},
+
 					Processing: speechTypes.ProcessingConfig{
 						TargetSampleRate: 16000,
 						SegmentDuration:  10 * time.Second,

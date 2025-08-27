@@ -22,9 +22,7 @@ func createTestConfig() speechTypes.SpeechConfig {
 			ThreadCount:    4,
 			WordTimestamps: true,
 		},
-		Vocabulary: speechTypes.VocabularyConfig{
-			HEMAVocabPath: "testdata/hema_vocabulary.txt",
-		},
+
 		Performance: speechTypes.PerformanceConfig{
 			MaxConcurrent:   2,
 			CacheSize:       10,

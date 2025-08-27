@@ -97,12 +97,12 @@ func (ww *WhisperWrapper) configureContext(context whisper.Context, params types
 		context.SetThreads(uint(params.ThreadCount))
 	}
 
-	// Set initial prompt with HEMA vocabulary
+	// Set initial prompt for context
 	if params.InitialPrompt != "" {
 		context.SetInitialPrompt(params.InitialPrompt)
 		ww.logger.Debug().
 			Str("initial_prompt", params.InitialPrompt).
-			Msg("Set initial prompt for vocabulary boosting")
+			Msg("Set initial prompt for context")
 	}
 
 	// Store noise suppression parameters for future processing
@@ -222,7 +222,7 @@ func (ww *WhisperWrapper) extractTokensFromSegment(segment whisper.Segment) []ty
 			Confidence: float64(token.P), // Probability as confidence
 			StartTime:  time.Duration(token.Start) * time.Millisecond,
 			EndTime:    time.Duration(token.End) * time.Millisecond,
-			IsHEMA:     false, // Will be set by vocabulary system
+			IsHEMA:     false, // HEMA classification not implemented
 		}
 
 		tokens = append(tokens, transcriptionToken)

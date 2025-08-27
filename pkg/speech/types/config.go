@@ -5,7 +5,6 @@ import "time"
 // SpeechConfig represents speech recognition configuration
 type SpeechConfig struct {
 	Whisper     WhisperConfig     `mapstructure:"whisper"`
-	Vocabulary  VocabularyConfig  `mapstructure:"vocabulary"`
 	Processing  ProcessingConfig  `mapstructure:"processing"`
 	Performance PerformanceConfig `mapstructure:"performance"`
 }
@@ -34,15 +33,6 @@ type WhisperConfig struct {
 
 	// Token filtering
 	MinTokenConfidence float32 `mapstructure:"min_token_confidence"`
-}
-
-// VocabularyConfig contains HEMA vocabulary configuration
-type VocabularyConfig struct {
-	HEMAVocabPath    string             `mapstructure:"hema_vocab_path"`
-	BoostWeights     map[string]float64 `mapstructure:"boost_weights"`
-	ContextSwitching bool               `mapstructure:"context_switching"`
-	ValidationRules  []string           `mapstructure:"validation_rules"`
-	CustomTerms      []string           `mapstructure:"custom_terms"`
 }
 
 // ProcessingConfig contains audio processing configuration for speech

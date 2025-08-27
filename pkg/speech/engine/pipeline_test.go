@@ -55,8 +55,7 @@ func TestProcessingPipeline_SetDependencies(t *testing.T) {
 	// Test setting model manager (would be nil without actual whisper setup)
 	pipeline.SetModelManager(nil)
 
-	// Test setting vocabulary (would be nil without actual vocabulary setup)
-	pipeline.SetVocabulary(nil)
+	// Vocabulary system removed - using whisper's initial prompt directly
 
 	// Pipeline should handle nil dependencies gracefully
 	assert.NotNil(t, pipeline)
@@ -79,102 +78,6 @@ func TestProcessingPipeline_Close(t *testing.T) {
 	err := pipeline.Close()
 
 	assert.NoError(t, err)
-}
-
-func TestProcessingPipeline_ApplyBoost(t *testing.T) {
-	pipeline := createTestProcessingPipeline(t)
-
-	tests := []struct {
-		name       string
-		confidence float64
-		boost      float64
-		expected   float64
-	}{
-		{
-			name:       "normal boost",
-			confidence: 0.8,
-			boost:      1.2,
-			expected:   0.96,
-		},
-		{
-			name:       "boost over 1.0 clamped",
-			confidence: 0.9,
-			boost:      1.5,
-			expected:   1.0,
-		},
-		{
-			name:       "no boost",
-			confidence: 0.7,
-			boost:      1.0,
-			expected:   0.7,
-		},
-		{
-			name:       "reduce confidence",
-			confidence: 0.8,
-			boost:      0.5,
-			expected:   0.4,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := pipeline.applyBoost(tt.confidence, tt.boost)
-			assert.InDelta(t, tt.expected, result, 0.001)
-		})
-	}
-}
-
-func TestProcessingPipeline_RecalculateSegmentConfidence(t *testing.T) {
-	pipeline := createTestProcessingPipeline(t)
-
-	segment := &speechTypes.TranscriptionSegment{
-		Text:       "hello world",
-		Confidence: 0.5, // Will be recalculated
-		Tokens: []speechTypes.Token{
-			{Text: "hello", Confidence: 0.8},
-			{Text: "world", Confidence: 0.9},
-		},
-	}
-
-	pipeline.recalculateSegmentConfidence(segment)
-
-	expectedConfidence := (0.8 + 0.9) / 2.0
-	assert.InDelta(t, expectedConfidence, segment.Confidence, 0.001)
-}
-
-func TestProcessingPipeline_RecalculateSegmentConfidence_EmptyTokens(t *testing.T) {
-	pipeline := createTestProcessingPipeline(t)
-
-	segment := &speechTypes.TranscriptionSegment{
-		Text:       "hello world",
-		Confidence: 0.5,
-		Tokens:     []speechTypes.Token{},
-	}
-
-	originalConfidence := segment.Confidence
-	pipeline.recalculateSegmentConfidence(segment)
-
-	// Should not change confidence if no tokens
-	assert.Equal(t, originalConfidence, segment.Confidence)
-}
-
-func TestProcessingPipeline_RecalculateOverallConfidence(t *testing.T) {
-	pipeline := createTestProcessingPipeline(t)
-
-	result := &speechTypes.TranscriptionResult{
-		Text:       "hello world test",
-		Confidence: 0.5, // Will be recalculated
-		Segments: []speechTypes.TranscriptionSegment{
-			{Text: "hello", Confidence: 0.8},
-			{Text: "world", Confidence: 0.9},
-			{Text: "test", Confidence: 0.7},
-		},
-	}
-
-	pipeline.recalculateOverallConfidence(result)
-
-	expectedConfidence := (0.8 + 0.9 + 0.7) / 3.0
-	assert.InDelta(t, expectedConfidence, result.Confidence, 0.001)
 }
 
 func TestProcessingPipeline_ContextCancellation(t *testing.T) {

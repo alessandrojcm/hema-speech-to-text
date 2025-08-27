@@ -185,9 +185,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("speech.whisper.beam_size", 5)
 	v.SetDefault("speech.whisper.word_timestamps", true)
 
-	v.SetDefault("speech.vocabulary.hema_vocab_path", "./config/hema_vocabulary.txt")
-	v.SetDefault("speech.vocabulary.context_switching", true)
-
 	v.SetDefault("speech.processing.target_sample_rate", 16000)
 	v.SetDefault("speech.processing.segment_duration", "10s")
 	v.SetDefault("speech.processing.overlap_duration", "1s")

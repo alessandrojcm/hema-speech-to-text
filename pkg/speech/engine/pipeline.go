@@ -8,7 +8,6 @@ import (
 	"github.com/your-org/hema-replay-system/pkg/audio/debug"
 	"github.com/your-org/hema-replay-system/pkg/speech/preprocessing"
 	"github.com/your-org/hema-replay-system/pkg/speech/types"
-	"github.com/your-org/hema-replay-system/pkg/speech/vocabulary"
 	"github.com/your-org/hema-replay-system/pkg/speech/whisper"
 )
 
@@ -16,7 +15,6 @@ import (
 type ProcessingPipeline struct {
 	config        types.SpeechConfig
 	modelManager  *whisper.ModelManager
-	vocabulary    *vocabulary.HEMAVocabulary
 	preprocessor  *preprocessing.SpeechAudioPreprocessor
 	qualityFilter *preprocessing.QualityFilter
 	debugSaver    *debug.SegmentSaver
@@ -45,11 +43,6 @@ func NewProcessingPipeline(config types.SpeechConfig, logger zerolog.Logger) (*P
 // SetModelManager sets the model manager for the pipeline
 func (pp *ProcessingPipeline) SetModelManager(modelManager *whisper.ModelManager) {
 	pp.modelManager = modelManager
-}
-
-// SetVocabulary sets the vocabulary for the pipeline
-func (pp *ProcessingPipeline) SetVocabulary(vocabulary *vocabulary.HEMAVocabulary) {
-	pp.vocabulary = vocabulary
 }
 
 // SetDebugSaver sets the debug saver for the pipeline
@@ -113,12 +106,8 @@ func (pp *ProcessingPipeline) Process(ctx context.Context, request types.Transcr
 		MinTokenConfidence: pp.config.Whisper.MinTokenConfidence,
 	}
 
-	// Build initial prompt from vocabulary if available
-	if request.UseVocabulary && pp.vocabulary != nil {
-		// Note: BuildInitialPrompt method needs to be implemented in HEMAVocabulary
-		// For now, just enable noise suppression without initial prompt
-		whisperParams.InitialPrompt = ""
-	}
+	// Using whisper's initial prompt parameter directly if configured
+	whisperParams.InitialPrompt = pp.config.Whisper.InitialPrompt
 
 	// Step 5: Save debug audio for segments that will be transcribed
 	if pp.debugSaver != nil {
@@ -139,10 +128,7 @@ func (pp *ProcessingPipeline) Process(ctx context.Context, request types.Transcr
 		return nil, fmt.Errorf("transcription failed: %w", err)
 	}
 
-	// Step 7: Apply vocabulary boosting if enabled (post-processing fallback)
-	if request.UseVocabulary && pp.vocabulary != nil {
-		pp.applyVocabularyBoosting(result)
-	}
+	// Step 7: No post-processing needed - using whisper's initial prompt directly
 
 	// Step 8: Apply confidence filtering
 	if result.Confidence < request.ConfidenceThreshold {
@@ -161,77 +147,4 @@ func (pp *ProcessingPipeline) Close() error {
 		return pp.preprocessor.Close()
 	}
 	return nil
-}
-
-// applyVocabularyBoosting applies HEMA vocabulary boosting to the result
-func (pp *ProcessingPipeline) applyVocabularyBoosting(result *types.TranscriptionResult) {
-	hemaTermsFound := make([]string, 0)
-
-	// Process each segment
-	for i := range result.Segments {
-		segment := &result.Segments[i]
-
-		// Process each token in the segment
-		for j := range segment.Tokens {
-			token := &segment.Tokens[j]
-
-			// Check if this token is a HEMA term
-			if pp.vocabulary.IsHEMATerm(token.Text) {
-				token.IsHEMA = true
-				hemaTermsFound = append(hemaTermsFound, token.Text)
-
-				// Apply boost to confidence
-				boost := pp.vocabulary.GetBoost(token.Text)
-				token.Confidence = pp.applyBoost(token.Confidence, boost)
-			}
-		}
-
-		// Recalculate segment confidence based on boosted tokens
-		pp.recalculateSegmentConfidence(segment)
-	}
-
-	// Update metadata
-	result.Metadata.HEMATermsFound = hemaTermsFound
-	result.Metadata.VocabularyBoost = len(hemaTermsFound) > 0
-
-	// Recalculate overall confidence
-	pp.recalculateOverallConfidence(result)
-}
-
-// applyBoost applies a boost factor to a confidence score
-func (pp *ProcessingPipeline) applyBoost(confidence float64, boost float64) float64 {
-	// Apply boost while keeping confidence in valid range [0, 1]
-	boosted := confidence * boost
-	if boosted > 1.0 {
-		boosted = 1.0
-	}
-	return boosted
-}
-
-// recalculateSegmentConfidence recalculates segment confidence based on token confidences
-func (pp *ProcessingPipeline) recalculateSegmentConfidence(segment *types.TranscriptionSegment) {
-	if len(segment.Tokens) == 0 {
-		return
-	}
-
-	var totalConfidence float64
-	for _, token := range segment.Tokens {
-		totalConfidence += token.Confidence
-	}
-
-	segment.Confidence = totalConfidence / float64(len(segment.Tokens))
-}
-
-// recalculateOverallConfidence recalculates overall result confidence
-func (pp *ProcessingPipeline) recalculateOverallConfidence(result *types.TranscriptionResult) {
-	if len(result.Segments) == 0 {
-		return
-	}
-
-	var totalConfidence float64
-	for _, segment := range result.Segments {
-		totalConfidence += segment.Confidence
-	}
-
-	result.Confidence = totalConfidence / float64(len(result.Segments))
 }

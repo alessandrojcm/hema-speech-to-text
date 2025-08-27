@@ -23,7 +23,6 @@ type SpeechMetrics struct {
 	// HEMA-specific metrics
 	hemaTermsDetected int64
 	hemaTermsTotal    int64
-	vocabularyHitRate float64
 
 	// Model metrics
 	modelLoadTimes        map[string]time.Duration
