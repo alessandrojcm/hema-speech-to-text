@@ -47,13 +47,13 @@ A real-time replay system for Historical European Martial Arts (HEMA) tournament
 - ✅ **Metrics Collection**: Comprehensive monitoring of transcription accuracy and performance
 - ✅ **Fallback Handling**: Graceful degradation when libraries are unavailable
 
-#### Phase 4 - Commentary Generation (Complete)
+#### Phase 4 - Commentary Generation (Complete - Simplified Architecture)
 - ✅ **LLM Integration**: MLX-LM server integration with Apple Silicon optimization
-- ✅ **Prompt Engineering**: HEMA-specific templates and context-aware prompt generation
+- ✅ **Simplified Architecture**: Streamlined flow from Transcription → Static Prompt → LLM → Basic Validation
 - ✅ **Quality Validation**: NLP-based quality assessment with Jaccard similarity scoring
-- ✅ **Fallback System**: Intelligent fallback mechanisms for reliable commentary generation
 - ✅ **Performance Optimization**: Sub-second commentary generation (~600-1200ms)
 - ✅ **End-to-End Integration**: Complete pipeline from audio input to LLM commentary output
+- ✅ **System Simplification**: Removed complex template and context management for improved reliability
 
 #### Phase 7 - Async Audio Processing (Complete)
 - ✅ **Non-Blocking Architecture**: Eliminated system freezing during speech input processing
@@ -219,11 +219,10 @@ make run-config
 │   │   ├── types/        # Speech types and configuration
 │   │   ├── internal/     # Metrics and error handling
 │   │   └── integration/  # Integration layer
-│   ├── commentary/       # Commentary generation system (Phase 4)
+│   ├── commentary/       # Commentary generation system (Phase 4 - Simplified)
 │   │   ├── engine/       # Commentary generation engine
-│   │   ├── context/      # Context management for HEMA matches
-│   │   ├── prompt/       # Prompt building and template management
-│   │   ├── templates/    # HEMA-specific commentary templates
+│   │   ├── prompt/       # Simple static prompt generation
+│   │   ├── types/        # Commentary types and configuration
 │   │   └── integration/  # End-to-end integration testing
 │   ├── llm/              # LLM integration (Phase 4)
 │   │   ├── engine/       # MLX-LM server integration

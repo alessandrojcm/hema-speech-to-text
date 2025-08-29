@@ -82,18 +82,23 @@
 - **Integration Layer**: Seamless connection between Phase 2 audio system and speech recognition
 
 ## Development Status & Next Steps
-- **Phase 4 Complete**: LLM-powered commentary generation fully implemented with MLX integration
+- **Phase 4 Complete**: LLM-powered commentary generation fully implemented with simplified architecture
 - **All Core Systems Complete**: Phases 1-4 fully implemented with comprehensive end-to-end testing
 - **Recent Phase 4 Achievements**: 
   - Replaced ollama with Apple MLX-LM server for optimal Apple Silicon performance
   - Implemented advanced NLP-based quality validation with Jaccard similarity
-  - Achieved sub-second commentary generation with intelligent fallback mechanisms
+  - Achieved sub-second commentary generation with simplified architecture
+  - **MAJOR SIMPLIFICATION (August 2025)**: Removed complex template and context management systems
+    - Deleted `pkg/commentary/templates/` and `pkg/commentary/context/` packages
+    - Streamlined flow: Transcription → Static Prompt → LLM → Basic Validation
+    - Improved system reliability and maintainability
   - Full integration testing passing with realistic HEMA judge call scenarios
 - **Performance Targets Exceeded**: 
   - Commentary generation: ~600-1200ms (target was <2s)
   - Quality validation: 72-78% confidence scores with appropriate relevance
   - System reliability: 100% test pass rate with end-to-end integration
-- **Production Ready**: Complete system deployed for live tournament use with LLM commentary
+  - **Improved Stability**: Eliminated segmentation faults and complex failure modes
+- **Production Ready**: Complete system deployed for live tournament use with simplified LLM commentary
 - **Next Phase Options**:
   - **Phase 5**: Automated pipeline integration and workflow optimization
   - **Phase 6**: Production optimization and deployment scaling
