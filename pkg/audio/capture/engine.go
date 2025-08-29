@@ -320,6 +320,10 @@ func (ce *CaptureEngine) captureLoop(ctx context.Context) {
 	frameSize := ce.config.FramesPerBuffer * ce.config.Channels
 	audioBuffer := make([]float32, frameSize)
 
+	// Track consecutive errors for stream health
+	consecutiveErrors := 0
+	const maxConsecutiveErrors = 10
+
 	ce.logger.Info().Int("frame_size", frameSize).Msg("Starting async capture loop")
 
 	for {
@@ -331,12 +335,54 @@ func (ce *CaptureEngine) captureLoop(ctx context.Context) {
 			ce.logger.Info().Msg("Capture loop stopped: stop signal received")
 			return
 		default:
+			// Check if stream is still active
+			if ce.stream == nil || !ce.stream.IsActive() {
+				ce.logger.Error().Msg("Audio stream is not active, attempting recovery")
+				if err := ce.attemptStreamRecovery(ctx); err != nil {
+					ce.logger.Error().Err(err).Msg("Failed to recover audio stream")
+					// Wait before retry
+					select {
+					case <-time.After(1 * time.Second):
+					case <-ctx.Done():
+						return
+					case <-ce.stopChan:
+						return
+					}
+					continue
+				}
+			}
+
 			// Read from PortAudio (blocking but fast)
 			if err := ce.stream.Read(audioBuffer); err != nil {
-				ce.logger.Error().Err(err).Msg("Stream read error")
+				consecutiveErrors++
+				ce.logger.Error().
+					Err(err).
+					Int("consecutive_errors", consecutiveErrors).
+					Msg("Stream read error")
+
+				// Check if we've hit too many consecutive errors
+				if consecutiveErrors >= maxConsecutiveErrors {
+					ce.logger.Error().Msg("Too many consecutive read errors, attempting stream recovery")
+					if recoveryErr := ce.attemptStreamRecovery(ctx); recoveryErr != nil {
+						ce.logger.Error().Err(recoveryErr).Msg("Stream recovery failed")
+						// Wait longer before next attempt
+						select {
+						case <-time.After(5 * time.Second):
+						case <-ctx.Done():
+							return
+						case <-ce.stopChan:
+							return
+						}
+					}
+					consecutiveErrors = 0
+				}
+
 				ce.handleCaptureError(err)
 				continue
 			}
+
+			// Reset error counter on successful read
+			consecutiveErrors = 0
 
 			// Get frame from pool (reduces GC pressure)
 			frame := getAudioFrame(len(audioBuffer))
@@ -553,4 +599,55 @@ func (ce *CaptureEngine) handleCaptureError(err error) {
 	}
 
 	time.Sleep(10 * time.Millisecond)
+}
+
+// attemptStreamRecovery tries to recover from stream failures
+func (ce *CaptureEngine) attemptStreamRecovery(ctx context.Context) error {
+	ce.mu.Lock()
+	defer ce.mu.Unlock()
+
+	ce.logger.Info().Msg("Attempting audio stream recovery")
+
+	// Close existing stream if it exists
+	if ce.stream != nil {
+		if err := ce.stream.Stop(); err != nil {
+			ce.logger.Warn().Err(err).Msg("Error stopping broken stream")
+		}
+		if err := ce.stream.Close(); err != nil {
+			ce.logger.Warn().Err(err).Msg("Error closing broken stream")
+		}
+		ce.stream = nil
+	}
+
+	// Re-initialize device if needed
+	device := ce.deviceManager.GetCurrentDevice()
+	if device == nil {
+		ce.logger.Info().Msg("Re-initializing audio device")
+		// Try to refresh device list
+		if err := ce.deviceManager.RefreshDevices(); err != nil {
+			return fmt.Errorf("failed to refresh devices: %w", err)
+		}
+
+		device = ce.deviceManager.GetCurrentDevice()
+		if device == nil {
+			return fmt.Errorf("no audio device available after refresh")
+		}
+	}
+
+	// Open new stream
+	stream, err := ce.deviceManager.portAudio.OpenStream(device, ce.config)
+	if err != nil {
+		return fmt.Errorf("failed to open new audio stream: %w", err)
+	}
+
+	// Start the new stream
+	if err := stream.Start(); err != nil {
+		stream.Close()
+		return fmt.Errorf("failed to start new audio stream: %w", err)
+	}
+
+	ce.stream = stream
+	ce.logger.Info().Msg("Audio stream recovery successful")
+
+	return nil
 }

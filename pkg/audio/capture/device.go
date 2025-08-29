@@ -56,7 +56,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize PortAudio: %w", err)
 	}
 
-	if err := dm.refreshDevices(); err != nil {
+	if err := dm.RefreshDevices(); err != nil {
 		return fmt.Errorf("failed to refresh devices: %w", err)
 	}
 
@@ -116,11 +116,12 @@ func (dm *DeviceManager) GetHealth() types.DeviceHealth {
 func (dm *DeviceManager) GetDevices() []types.DeviceInfo {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-	dm.refreshDevices()
+	dm.RefreshDevices()
 	return dm.devices
 }
 
-func (dm *DeviceManager) refreshDevices() error {
+// RefreshDevices updates the list of available audio devices
+func (dm *DeviceManager) RefreshDevices() error {
 	devices, err := dm.portAudio.GetDevices()
 	if err != nil {
 		return err
@@ -180,7 +181,7 @@ func (dm *DeviceManager) performHealthCheck() {
 		return
 	}
 
-	if err := dm.refreshDevices(); err != nil {
+	if err := dm.RefreshDevices(); err != nil {
 		dm.logger.Warn().Err(err).Msg("Failed to refresh devices during health check")
 		dm.health.WarningCount++
 		return

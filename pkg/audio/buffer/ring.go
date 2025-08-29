@@ -83,10 +83,24 @@ func (rb *RingBuffer) Extract(duration time.Duration, endTime time.Time) (*types
 
 	sampleCount := int64(duration.Seconds() * float64(rb.sampleRate) * float64(rb.channels))
 
-	endPos := rb.timeToPosition(endTime)
+	// Always use the current write position as the reference point
+	// This ensures we're extracting from the actual buffered data
+	endPos := rb.writePos
 	startPos := endPos - sampleCount
 
-	if startPos < 0 || startPos < rb.writePos-rb.size {
+	// Check if we have enough data in the buffer
+	// The buffer can only hold rb.size samples, so we can't extract more than what's available
+	availableData := rb.writePos
+	if availableData > rb.size {
+		availableData = rb.size
+	}
+
+	if sampleCount > availableData {
+		return nil, types.ErrInsufficientData
+	}
+
+	// Check if the requested data has been overwritten
+	if startPos < 0 || (rb.writePos > rb.size && startPos < rb.writePos-rb.size) {
 		return nil, types.ErrInsufficientData
 	}
 
@@ -135,15 +149,12 @@ func (rb *RingBuffer) GetStats() types.BufferStats {
 	}
 }
 
+// timeToPosition is deprecated - we now always use writePos as reference
+// Keeping for compatibility but should be removed in future refactor
 func (rb *RingBuffer) timeToPosition(t time.Time) int64 {
-	if rb.startTime.IsZero() {
-		return rb.writePos
-	}
-
-	elapsed := t.Sub(rb.startTime)
-	samples := int64(elapsed.Seconds() * float64(rb.sampleRate) * float64(rb.channels))
-
-	return samples % rb.size
+	// Always return current write position
+	// Time-based positioning proved unreliable after long runs
+	return rb.writePos
 }
 
 func (rb *RingBuffer) extractRange(startPos, sampleCount int64, dest []float32) error {
