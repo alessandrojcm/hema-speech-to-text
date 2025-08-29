@@ -122,3 +122,5 @@
 - **CLI Usability**: Added device listing, testing modes, and better error messages
 - **Dependency Management**: Updated to latest stable versions of core audio libraries
 - **Code Simplification**: Removed redundant FFT implementations, streamlined processing pipeline
+- **VAD-Driven Processing**: Replaced polling-based speech detection with event-driven VAD monitoring for reduced latency
+- **Pipeline Stability**: Fixed infinite loop bug when processing low-quality audio segments by properly marking failed segments

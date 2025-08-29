@@ -3,6 +3,7 @@ package vad
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
@@ -26,7 +27,7 @@ func (v *VADDetector) Start(ctx context.Context) error {
 
 // monitorAudioStream monitors the audio stream for voice activity
 func (v *VADDetector) monitorAudioStream(ctx context.Context) {
-	ticker := time.NewTicker(100 * time.Millisecond) // Check every 100ms
+	ticker := time.NewTicker(50 * time.Millisecond) // Check every 50ms for better responsiveness
 	defer ticker.Stop()
 
 	for {
@@ -51,8 +52,8 @@ func (v *VADDetector) checkVADState() bool {
 		return false
 	}
 
-	// Extract recent audio samples for VAD analysis (100ms window)
-	samples, err := v.audioManager.GetRecentAudioSamples(100 * time.Millisecond)
+	// Extract recent audio samples for VAD analysis (200ms window for better detection)
+	samples, err := v.audioManager.GetRecentAudioSamples(200 * time.Millisecond)
 	if err != nil {
 		v.logger.Debug().Err(err).Msg("Failed to get recent audio samples")
 		return false
@@ -62,8 +63,25 @@ func (v *VADDetector) checkVADState() bool {
 		return false
 	}
 
+	// Calculate RMS for debug logging
+	var sum float64
+	for _, sample := range samples {
+		sum += float64(sample * sample)
+	}
+	rms := math.Sqrt(sum / float64(len(samples)))
+
 	// Use the processor's VAD to detect voice activity
 	vadActive := v.processor.DetectVoiceActivity(samples)
+
+	// Log VAD check results periodically for debugging
+	if time.Since(v.lastLogTime) > 2*time.Second {
+		v.logger.Debug().
+			Int("samples", len(samples)).
+			Float64("rms", rms).
+			Bool("vad_active", vadActive).
+			Msg("VAD check status")
+		v.lastLogTime = time.Now()
+	}
 
 	return vadActive
 }

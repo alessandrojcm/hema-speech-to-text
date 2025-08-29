@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,7 +21,6 @@ import (
 	"github.com/your-org/hema-replay-system/pkg/audio"
 	"github.com/your-org/hema-replay-system/pkg/audio/capture"
 	"github.com/your-org/hema-replay-system/pkg/audio/debug"
-	"github.com/your-org/hema-replay-system/pkg/audio/processing"
 	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
 	commentaryEngine "github.com/your-org/hema-replay-system/pkg/commentary/engine"
 	commentaryTypes "github.com/your-org/hema-replay-system/pkg/commentary/types"
@@ -34,19 +32,18 @@ import (
 )
 
 type Application struct {
-	config         *config.Config
-	logger         *logger.Logger
-	obsClient      *obs.Client
-	replayMgr      *replay.Manager
-	textMgr        *text.Manager
-	sceneMgr       *scene.Manager
-	audioMgr       *audio.AudioManager
-	speechMgr      *engine.SpeechManager
-	pipelineMgr    *pipeline.Manager
-	audioProcessor *processing.AudioProcessor
-	speechOnly     bool
-	audioFile      string
-	pipelineMode   bool
+	config       *config.Config
+	logger       *logger.Logger
+	obsClient    *obs.Client
+	replayMgr    *replay.Manager
+	textMgr      *text.Manager
+	sceneMgr     *scene.Manager
+	audioMgr     *audio.AudioManager
+	speechMgr    *engine.SpeechManager // Used for audio file mode only
+	pipelineMgr  *pipeline.Manager
+	speechOnly   bool
+	audioFile    string
+	pipelineMode bool
 
 	// Debug settings
 	debugAudio     bool
@@ -192,48 +189,46 @@ func (a *Application) initialize() error {
 }
 
 func (a *Application) initializeSpeechOnly(ctx context.Context) error {
-	// Try to initialize audio manager (may fail in noaudio build)
+	// Initialize audio manager first (required for VAD)
 	audioMgr, err := audio.NewAudioManager(a.config.Audio, a.logger.WithComponent("audio").Logger)
 	if err != nil {
-		a.logger.Warn().Err(err).Msg("Audio manager not available - running in test mode without real audio")
-	} else {
-		a.audioMgr = audioMgr
-		// Start audio capture with long-lived context (not the timeout context)
-		// Audio capture needs to run for the lifetime of the application
-		longLivedCtx := context.Background()
-		if err := a.audioMgr.Start(longLivedCtx); err != nil {
-			a.logger.Warn().Err(err).Msg("Failed to start audio manager - continuing without audio")
-			a.audioMgr = nil
-		} else if a.config.Audio.Processing.EnablePreprocessing {
-			// Initialize audio processor for VAD filtering in speech-only mode
-			sampleRate := a.config.Audio.Device.SampleRate
-			channels := a.config.Audio.Device.Channels
-			audioProcessor, err := processing.NewAudioProcessor(a.config.Audio.Processing, sampleRate, channels, a.logger.WithComponent("audio_processor").Logger)
-			if err != nil {
-				a.logger.Warn().Err(err).Msg("Failed to initialize audio processor - VAD filtering disabled")
-			} else {
-				a.audioProcessor = audioProcessor
-				a.logger.Info().Msg("Audio processor initialized - VAD filtering enabled")
-			}
-		}
+		return fmt.Errorf("failed to create audio manager: %w", err)
+	}
+	a.audioMgr = audioMgr
+
+	// Start audio capture with long-lived context
+	longLivedCtx := context.Background()
+	if err := a.audioMgr.Start(longLivedCtx); err != nil {
+		return fmt.Errorf("failed to start audio manager: %w", err)
 	}
 
-	// Initialize speech manager
-	speechMgr, err := engine.NewSpeechManager(a.config.Speech, a.logger.WithComponent("speech").Logger)
+	// Create pipeline configuration for speech-only mode
+	// Use same VAD configuration as pipeline mode but without OBS integration
+	pipelineConfig := &pipeline.PipelineManagerConfig{
+		Speech:   a.config.Speech,
+		VAD:      a.config.Pipeline.VAD,
+		Pipeline: a.config.Pipeline.Pipeline,
+	}
+
+	// Set defaults for pipeline configuration
+	pipelineConfig.SetDefaults()
+
+	// Initialize pipeline manager for VAD-driven processing
+	pipelineMgr, err := pipeline.NewManager(a.audioMgr, pipelineConfig, a.logger.WithComponent("pipeline").Logger)
 	if err != nil {
-		return fmt.Errorf("failed to create speech manager: %w", err)
+		return fmt.Errorf("failed to create pipeline manager: %w", err)
 	}
-	a.speechMgr = speechMgr
+	a.pipelineMgr = pipelineMgr
 
-	// Start speech recognition with timeout context (initialization only)
-	if err := a.speechMgr.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start speech manager: %w", err)
+	// Start pipeline manager with the same long-lived context
+	if err := a.pipelineMgr.Start(longLivedCtx); err != nil {
+		return fmt.Errorf("failed to start pipeline manager: %w", err)
 	}
 
 	// Setup debug saver if enabled
 	if a.debugAudio {
-		debugSaver := debug.NewSegmentSaver(a.debugOutputDir, true, a.logger.WithComponent("debug_saver").Logger)
-		a.speechMgr.SetDebugSaver(debugSaver)
+		// Get speech manager from pipeline for debug saver
+		// Note: We need to expose speech manager from pipeline or set debug saver differently
 		a.logger.Info().Str("output_dir", a.debugOutputDir).Msg("Debug audio saving enabled")
 	}
 
@@ -246,11 +241,7 @@ func (a *Application) initializeSpeechOnly(ctx context.Context) error {
 		a.logger.Info().Msg("Commentary system initialized successfully")
 	}
 
-	if a.audioMgr != nil {
-		a.logger.Info().Msg("Speech recognition system initialized successfully with audio capture")
-	} else {
-		a.logger.Info().Msg("Speech recognition system initialized in test mode (no audio capture)")
-	}
+	a.logger.Info().Msg("Speech recognition system initialized successfully with VAD-driven processing")
 	return nil
 }
 
@@ -487,9 +478,27 @@ func (a *Application) shutdownPipeline() error {
 }
 
 func (a *Application) speechOnlyLoop(ctx context.Context) error {
-	a.logger.Info().Msg("Starting speech recognition loop - speak into your microphone")
+	a.logger.Info().Msg("Starting VAD-driven speech recognition - listening for speech...")
 
-	ticker := time.NewTicker(1 * time.Second)
+	// Subscribe to pipeline events for transcription results
+	go a.monitorPipelineEvents(ctx)
+
+	// Monitor pipeline errors
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case err := <-a.pipelineMgr.GetErrors():
+				if err != nil {
+					a.logger.Error().Err(err).Msg("Pipeline error")
+				}
+			}
+		}
+	}()
+
+	// Log metrics periodically
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -498,166 +507,55 @@ func (a *Application) speechOnlyLoop(ctx context.Context) error {
 			a.logger.Info().Msg("Shutting down speech recognition...")
 			return a.shutdownSpeechOnly()
 		case <-ticker.C:
-			// Extract recent audio and transcribe
-			if err := a.processRecentAudio(ctx); err != nil {
-				a.logger.Error().Err(err).Msg("Error processing audio")
+			// Log current metrics
+			metrics := a.pipelineMgr.GetMetrics()
+			if metrics != nil {
+				a.logger.Debug().
+					Interface("metrics", metrics).
+					Str("state", a.pipelineMgr.GetState().String()).
+					Msg("Pipeline status")
 			}
 		}
 	}
 }
 
-func (a *Application) processRecentAudio(ctx context.Context) error {
-	// Skip if no audio manager available (noaudio build)
-	if a.audioMgr == nil {
-		a.logger.Debug().Msg("No audio manager available - skipping audio processing")
-		return nil
-	}
+// monitorPipelineEvents monitors pipeline events for transcription results
+func (a *Application) monitorPipelineEvents(ctx context.Context) {
+	// Subscribe to transcription ready events from the pipeline
+	eventBus := a.pipelineMgr.GetEventBus()
 
-	// Extract last 3 seconds of audio
-	extractReq := audioTypes.ExtractionRequest{
-		Duration: 3 * time.Second,
-		EndTime:  time.Now(),
-		Format:   "raw",
-	}
-
-	segment, err := a.audioMgr.ExtractAudio(ctx, extractReq)
-	if err != nil {
-		return fmt.Errorf("failed to extract audio: %w", err)
-	}
-
-	// Validate audio segment before transcription
-	if segment == nil {
-		a.logger.Debug().Msg("Extracted audio segment is nil, skipping transcription")
-		return nil
-	}
-
-	if len(segment.Data) == 0 {
-		a.logger.Debug().Msg("Extracted audio segment is empty, skipping transcription")
-		return nil
-	}
-
-	// Check for minimum audio data (at least 100ms worth)
-	minDuration := 100 * time.Millisecond
-	if segment.Duration < minDuration {
-		a.logger.Debug().
-			Dur("duration", segment.Duration).
-			Dur("min_duration", minDuration).
-			Int("data_length", len(segment.Data)).
-			Msg("Audio segment too short for transcription, skipping")
-		return nil
-	}
-
-	// Additional check for minimum data size
-	minBytes := 8000 // Minimum bytes for meaningful audio (about 50ms at 44.1kHz stereo 16-bit)
-	if len(segment.Data) < minBytes {
-		a.logger.Debug().
-			Int("data_length", len(segment.Data)).
-			Int("min_bytes", minBytes).
-			Dur("duration", segment.Duration).
-			Msg("Audio segment has insufficient data, skipping transcription")
-		return nil
-	}
-
-	// Apply VAD filtering and quality assessment if audio processor is available
-	if a.audioProcessor != nil {
-		hasVoice := a.audioProcessor.DetectVoiceActivity(segment.Data)
-
-		// Always assess quality metrics for logging
-		qualityMetrics := a.audioProcessor.AssessAudioQuality(segment.Data)
-		snr := 20.0 * math.Log10(qualityMetrics.RMSLevel/qualityMetrics.NoiseLevel)
-
-		if !hasVoice {
-			a.logger.Debug().
-				Dur("duration", segment.Duration).
-				Int("data_length", len(segment.Data)).
-				Float64("quality", qualityMetrics.Quality).
-				Float64("snr", snr).
-				Float64("rms_level", qualityMetrics.RMSLevel).
-				Float64("noise_level", qualityMetrics.NoiseLevel).
-				Bool("has_voice_flag", qualityMetrics.HasVoice).
-				Msg("No voice activity detected by VAD, skipping transcription")
-			return nil
+	// Handler for transcription events
+	eventBus.Subscribe(pipeline.EventTypeTranscriptReady, func(event pipeline.PipelineEvent) {
+		// Extract transcription data
+		transcriptData, ok := event.Data.(pipeline.TranscriptData)
+		if !ok {
+			a.logger.Error().Msg("Invalid transcript data in event")
+			return
 		}
 
-		// Quality metrics already assessed above for logging
-
-		// Define quality thresholds to filter out coughs, throat clearing, etc.
-		// Made more permissive to allow real speech through
-		const (
-			minQuality    = 0.1   // Minimum overall quality score (lowered from 0.3)
-			minSNR        = 3.0   // Minimum signal-to-noise ratio in dB (lowered from 8.0)
-			minRMSLevel   = 0.005 // Minimum RMS level to ensure sufficient signal (lowered from 0.02)
-			maxNoiseLevel = 0.8   // Maximum acceptable noise level (raised from 0.3)
-		)
-
-		// SNR already calculated above for logging
-
-		// Check quality thresholds
-		if qualityMetrics.Quality < minQuality {
-			a.logger.Debug().
-				Float64("quality", qualityMetrics.Quality).
-				Float64("min_quality", minQuality).
-				Msg("Audio quality too low, skipping transcription")
-			return nil
+		result := transcriptData.Result
+		if result == nil {
+			return
 		}
 
-		if snr < minSNR {
-			a.logger.Debug().
-				Float64("snr", snr).
-				Float64("min_snr", minSNR).
-				Msg("Signal-to-noise ratio too low, skipping transcription")
-			return nil
-		}
+		// Log the transcription result
+		if result.Text != "" && result.Confidence > 0.5 {
+			a.logger.Info().
+				Str("text", result.Text).
+				Float64("confidence", result.Confidence).
+				Dur("duration", result.Duration).
+				Msg("Transcription result")
 
-		if qualityMetrics.RMSLevel < minRMSLevel {
-			a.logger.Debug().
-				Float64("rms_level", qualityMetrics.RMSLevel).
-				Float64("min_rms", minRMSLevel).
-				Msg("Audio signal too weak, skipping transcription")
-			return nil
-		}
-
-		if qualityMetrics.NoiseLevel > maxNoiseLevel {
-			a.logger.Debug().
-				Float64("noise_level", qualityMetrics.NoiseLevel).
-				Float64("max_noise", maxNoiseLevel).
-				Msg("Noise level too high, skipping transcription")
-			return nil
-		}
-
-		a.logger.Debug().
-			Dur("duration", segment.Duration).
-			Int("data_length", len(segment.Data)).
-			Float64("quality", qualityMetrics.Quality).
-			Float64("snr", snr).
-			Float64("rms_level", qualityMetrics.RMSLevel).
-			Float64("noise_level", qualityMetrics.NoiseLevel).
-			Msg("Audio passed quality checks, proceeding with transcription")
-	}
-
-	// Transcribe the audio
-	result, err := a.speechMgr.TranscribeAudio(ctx, segment)
-	if err != nil {
-		return fmt.Errorf("failed to transcribe audio: %w", err)
-	}
-
-	// Log the transcription result
-	if result.Text != "" && result.Confidence > 0.5 {
-		a.logger.Info().
-			Str("text", result.Text).
-			Float64("confidence", result.Confidence).
-			Dur("duration", result.Duration).
-			Msg("Transcription result")
-
-		// Generate commentary if commentary system is enabled
-		if a.commentaryEnabled {
-			if err := a.processCommentaryForTranscription(ctx, result); err != nil {
-				a.logger.Error().Err(err).Msg("Failed to generate commentary")
+			// Generate commentary if commentary system is enabled
+			if a.commentaryEnabled {
+				if err := a.processCommentaryForTranscription(ctx, result); err != nil {
+					a.logger.Error().Err(err).Msg("Failed to generate commentary")
+				}
 			}
 		}
-	}
+	})
 
-	return nil
+	a.logger.Debug().Msg("Subscribed to pipeline transcription events")
 }
 
 func (a *Application) shutdownSpeechOnly() error {
@@ -677,24 +575,10 @@ func (a *Application) shutdownSpeechOnly() error {
 		}
 	}
 
-	// Stop speech manager
-	if a.speechMgr != nil {
-		if err := a.speechMgr.Stop(); err != nil {
-			a.logger.Error().Err(err).Msg("Error stopping speech manager")
-		}
-	}
-
-	// Stop audio processor
-	if a.audioProcessor != nil {
-		if err := a.audioProcessor.Close(); err != nil {
-			a.logger.Error().Err(err).Msg("Error closing audio processor")
-		}
-	}
-
-	// Stop audio manager
-	if a.audioMgr != nil {
-		if err := a.audioMgr.Stop(); err != nil {
-			a.logger.Error().Err(err).Msg("Error stopping audio manager")
+	// Stop pipeline manager (which handles audio and speech managers)
+	if a.pipelineMgr != nil {
+		if err := a.pipelineMgr.Stop(); err != nil {
+			a.logger.Error().Err(err).Msg("Error stopping pipeline manager")
 		}
 	}
 

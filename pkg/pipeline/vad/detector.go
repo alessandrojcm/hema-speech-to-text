@@ -18,6 +18,7 @@ type VADDetector struct {
 	isActive      bool
 	activityStart time.Time
 	silenceStart  time.Time
+	lastLogTime   time.Time
 
 	// Configuration
 	config *Config

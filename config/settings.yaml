@@ -45,7 +45,7 @@ audio:
     normalization: false # Enable normalization
     highpass_filter: 80.0 # High-pass filter frequency (Hz)
     lowpass_filter: 8000.0 # Low-pass filter frequency (Hz)
-    vad_threshold: 0.01 # Voice activity detection threshold (lowered from 0.1)
+    vad_threshold: 0.001 # Voice activity detection threshold (lowered for better sensitivity)
     # Library selection
     resampler_type: "gosamplerate"
     vad_type: "webrtc"
@@ -65,7 +65,7 @@ audio:
 
 speech:
   whisper:
-    model_path: "./models/ggml-base.bin"
+    model_path: "./models/ggml-medium.bin"
     model_size: "base"
     language: "en"
     use_gpu: true

@@ -309,10 +309,15 @@ func (m *Manager) processPipeline() {
 func (m *Manager) processAudioSegment(segmentData *AudioSegmentData) {
 	startTime := time.Now()
 
+	// Mark segment as processing to avoid reprocessing
+	m.segmentBuffer.MarkProcessing(segmentData.SegmentID)
+
 	// Process through speech recognition using the manager's TranscribeAudio method
 	result, err := m.speechManager.TranscribeAudio(m.ctx, segmentData.Segment)
 	if err != nil {
 		m.handleError(fmt.Errorf("speech processing failed: %w", err))
+		// Mark segment as failed to remove it from pending
+		m.segmentBuffer.MarkFailed(segmentData.SegmentID, err)
 		return
 	}
 
@@ -413,4 +418,9 @@ func (m *Manager) GetErrors() <-chan error {
 // GetState returns the current pipeline state
 func (m *Manager) GetState() State {
 	return m.state.Current()
+}
+
+// GetEventBus returns the pipeline's event bus for external subscriptions
+func (m *Manager) GetEventBus() *EventBus {
+	return m.eventBus
 }

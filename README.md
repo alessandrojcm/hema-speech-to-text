@@ -82,6 +82,8 @@ A real-time replay system for Historical European Martial Arts (HEMA) tournament
 - **CLI Enhancements**: Added `--list-devices` flag for audio device discovery and improved error handling
 - **Audio Processing Simplification**: Streamlined audio processing pipeline by consolidating components and removing redundant implementations
 - **Dependency Updates**: Updated to latest versions of audio processing libraries for improved stability
+- **VAD-Driven Processing**: Replaced polling-based speech detection with event-driven VAD monitoring in speech-only mode for reduced latency
+- **Pipeline Stability Fix**: Resolved infinite loop bug when processing low-quality audio segments by properly marking failed segments for removal
 - **Processing Performance**: 5-10x faster FFT, <50ms real-time latency
 - **Memory Efficiency**: 30% reduction through optimized algorithms
 - **Audio Quality**: THD+N < -60dB for resampled speech signals
