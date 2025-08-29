@@ -304,9 +304,7 @@ func validateConfig(config *Config) error {
 	if config.Commentary.MaxLatency <= 0 {
 		return fmt.Errorf("commentary.max_latency must be positive")
 	}
-	if config.Commentary.MaxRetries < 0 {
-		return fmt.Errorf("commentary.max_retries cannot be negative")
-	}
+
 	if config.Commentary.MinConfidence < 0 || config.Commentary.MinConfidence > 1 {
 		return fmt.Errorf("commentary.min_confidence must be between 0 and 1")
 	}

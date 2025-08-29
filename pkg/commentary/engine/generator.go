@@ -10,18 +10,15 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/your-org/hema-replay-system/pkg/commentary/prompt"
-	"github.com/your-org/hema-replay-system/pkg/commentary/templates"
 	"github.com/your-org/hema-replay-system/pkg/commentary/types"
 	llmtypes "github.com/your-org/hema-replay-system/pkg/llm/types"
 )
 
-// CommentaryGenerator orchestrates the commentary generation pipeline
+// CommentaryGenerator orchestrates the simplified commentary generation pipeline
 type CommentaryGenerator struct {
 	// Dependencies
-	llmEngine     llmtypes.EngineInterface
-	promptBuilder *prompt.Builder
-	validator     *QualityValidator
-	fallback      *FallbackGenerator
+	llmEngine llmtypes.EngineInterface
+	validator *QualityValidator
 
 	// Configuration
 	config *types.CommentaryConfig
@@ -60,10 +57,9 @@ type worker struct {
 	logger    zerolog.Logger
 }
 
-// NewCommentaryGenerator creates a new commentary generator
+// NewCommentaryGenerator creates a new simplified commentary generator
 func NewCommentaryGenerator(
 	llmEngine llmtypes.EngineInterface,
-	promptBuilder *prompt.Builder,
 	config *types.CommentaryConfig,
 	logger zerolog.Logger,
 ) (*CommentaryGenerator, error) {
@@ -74,33 +70,25 @@ func NewCommentaryGenerator(
 	ctx, cancel := context.WithCancel(context.Background())
 
 	generator := &CommentaryGenerator{
-		llmEngine:     llmEngine,
-		promptBuilder: promptBuilder,
-		config:        config,
-		logger:        logger.With().Str("component", "commentary-generator").Logger(),
-		ctx:           ctx,
-		cancel:        cancel,
-		requestChan:   make(chan *generationRequest, config.ConcurrentRequests*2),
-		workerCount:   config.ConcurrentRequests,
+		llmEngine:   llmEngine,
+		config:      config,
+		logger:      logger.With().Str("component", "commentary-generator").Logger(),
+		ctx:         ctx,
+		cancel:      cancel,
+		requestChan: make(chan *generationRequest, config.ConcurrentRequests*2),
+		workerCount: config.ConcurrentRequests,
 		metrics: &types.GenerationMetrics{
 			CollectionStart: time.Now(),
 			LastUpdated:     time.Now(),
 		},
 	}
 
-	// Initialize validator
+	// Initialize simplified validator
 	validator, err := NewQualityValidator(config, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create validator: %w", err)
 	}
 	generator.validator = validator
-
-	// Initialize fallback generator
-	fallback, err := NewFallbackGenerator(config, logger)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create fallback generator: %w", err)
-	}
-	generator.fallback = fallback
 
 	return generator, nil
 }
@@ -244,7 +232,7 @@ func (w *worker) run() {
 	w.logger.Debug().Msg("Worker stopped")
 }
 
-// processRequest processes a single generation request
+// processRequest processes a single generation request with simplified flow
 func (w *worker) processRequest(request *generationRequest) *types.CommentaryResponse {
 	startTime := request.startTime
 
@@ -256,71 +244,32 @@ func (w *worker) processRequest(request *generationRequest) *types.CommentaryRes
 		Message:   fmt.Sprintf("Worker %d processing request", w.id),
 	})
 
-	// Step 1: Build prompt
+	// Step 1: Build simple static prompt
 	promptStartTime := time.Now()
-	promptReq := &prompt.BuildRequest{
-		Transcription: request.request.Input.Text,
-		Confidence:    request.request.Input.Confidence,
-		Timestamp:     request.request.Input.Timestamp,
-		TemplateID:    request.request.Input.Text, // Will be selected automatically
-		ExtraContext:  request.request.Input.ExtraData,
-	}
-
-	if request.request.Input.AudioMetrics != nil {
-		promptReq.AudioMetrics = &templates.AudioMetrics{
-			Volume:       1.0 - request.request.Input.AudioMetrics.BackgroundNoise, // Convert background noise to volume
-			Clarity:      request.request.Input.AudioMetrics.Clarity,
-			NoiseLevel:   request.request.Input.AudioMetrics.BackgroundNoise,
-			VoicePresent: request.request.Input.AudioMetrics.VoiceDetection,
-		}
-	}
-
-	if request.request.Input.AudioMetrics != nil {
-		promptReq.AudioMetrics = &templates.AudioMetrics{
-			Volume:       1.0 - request.request.Input.AudioMetrics.BackgroundNoise, // Convert background noise to volume
-			Clarity:      request.request.Input.AudioMetrics.Clarity,
-			NoiseLevel:   request.request.Input.AudioMetrics.BackgroundNoise,
-			VoicePresent: request.request.Input.AudioMetrics.VoiceDetection,
-		}
-	}
-
-	promptResult, err := w.generator.promptBuilder.Build(promptReq)
-	if err != nil {
-		request.logEntries = append(request.logEntries, types.LogEntry{
-			Step:      "prompt_build_failed",
-			Timestamp: time.Now(),
-			Duration:  time.Since(promptStartTime),
-			Success:   false,
-			Message:   err.Error(),
-		})
-
-		// Try fallback
-		return w.generateFallback(request, fmt.Errorf("prompt build failed: %w", err))
-	}
+	staticPrompt := prompt.BuildSimplePrompt(request.request.Input.Text)
 
 	request.logEntries = append(request.logEntries, types.LogEntry{
 		Step:      "prompt_built",
 		Timestamp: time.Now(),
 		Duration:  time.Since(promptStartTime),
 		Success:   true,
-		Message:   fmt.Sprintf("Prompt built using template %s", promptResult.TemplateID),
-		Data:      map[string]interface{}{"template_id": promptResult.TemplateID, "prompt_length": promptResult.PromptLength},
+		Message:   "Static prompt built successfully",
+		Data:      map[string]interface{}{"prompt_length": len(staticPrompt)},
 	})
 
-	// Step 2: Generate with LLM
+	// Step 2: Generate with LLM (no retry logic)
 	if w.generator.llmEngine == nil {
-		// No LLM engine available, go directly to fallback
-		return w.generateFallback(request, fmt.Errorf("no LLM engine available"))
+		return w.generator.errorResponse(fmt.Errorf("no LLM engine available"), startTime)
 	}
 
 	llmStartTime := time.Now()
 	llmReq := llmtypes.GenerationRequest{
-		Prompt:      promptResult.Prompt,
-		MaxTokens:   150, // Default for commentary
+		Prompt:      staticPrompt,
+		MaxTokens:   150,
 		Temperature: 0.7,
 		TopP:        0.9,
 		TopK:        40,
-		Timeout:     15 * time.Second, // Increased from 2s to allow for LLM generation
+		Timeout:     15 * time.Second,
 	}
 
 	llmResp, err := w.generator.llmEngine.Generate(llmReq)
@@ -332,9 +281,7 @@ func (w *worker) processRequest(request *generationRequest) *types.CommentaryRes
 			Success:   false,
 			Message:   err.Error(),
 		})
-
-		// Try fallback
-		return w.generateFallback(request, fmt.Errorf("LLM generation failed: %w", err))
+		return w.generator.errorResponse(fmt.Errorf("LLM generation failed: %w", err), startTime)
 	}
 
 	request.logEntries = append(request.logEntries, types.LogEntry{
@@ -346,7 +293,7 @@ func (w *worker) processRequest(request *generationRequest) *types.CommentaryRes
 		Data:      map[string]interface{}{"token_count": llmResp.TokenCount, "tokens_per_second": llmResp.Metadata.TokensPerSecond},
 	})
 
-	// Step 3: Validate quality
+	// Step 3: Basic validation only
 	validationStartTime := time.Now()
 	validation := w.generator.validator.Validate(llmResp.Text, request.request.Input)
 
@@ -355,16 +302,16 @@ func (w *worker) processRequest(request *generationRequest) *types.CommentaryRes
 		Timestamp: time.Now(),
 		Duration:  time.Since(validationStartTime),
 		Success:   validation.IsValid,
-		Message:   fmt.Sprintf("Quality validation: %v (score: %.2f)", validation.IsValid, validation.Confidence),
+		Message:   fmt.Sprintf("Basic validation: %v (score: %.2f)", validation.IsValid, validation.Confidence),
 		Data:      map[string]interface{}{"quality_score": validation.Confidence, "issues": validation.Issues},
 	})
 
-	if !validation.IsValid && w.generator.config.EnableFallback {
-		// Try fallback
-		return w.generateFallback(request, fmt.Errorf("quality validation failed: %v", validation.Issues))
+	// If validation fails, discard (no fallback as per instructions)
+	if !validation.IsValid {
+		return w.generator.errorResponse(fmt.Errorf("validation failed, discarding: %v", validation.Issues), startTime)
 	}
 
-	// Step 4: Create commentary result
+	// Step 4: Create simplified commentary result
 	commentary := &types.Commentary{
 		ID:          generateCommentaryID(),
 		Text:        llmResp.Text,
@@ -375,8 +322,6 @@ func (w *worker) processRequest(request *generationRequest) *types.CommentaryRes
 
 		InputText:       request.request.Input.Text,
 		InputConfidence: request.request.Input.Confidence,
-		TemplateID:      promptResult.TemplateID,
-		PromptUsed:      promptResult.Prompt,
 
 		GenerationLatency: llmResp.Latency,
 		CacheHit:          false,
@@ -386,69 +331,15 @@ func (w *worker) processRequest(request *generationRequest) *types.CommentaryRes
 		ValidationPassed: validation.IsValid,
 
 		Metadata: types.CommentaryMetadata{
-			Category:        promptResult.Metadata["template_category"].(string),
-			Priority:        promptResult.Metadata["template_priority"].(string),
 			ProcessingSteps: extractSteps(request.logEntries),
 			ExtraData:       make(map[string]string),
 		},
-	}
-
-	// Add match context if available
-	if request.request.Input.Context != nil {
-		commentary.Metadata.MatchContext = request.request.Input.Context
-	}
-
-	// Add audio quality if available
-	if request.request.Input.AudioMetrics != nil {
-		commentary.Metadata.AudioQuality = request.request.Input.AudioMetrics
 	}
 
 	totalLatency := time.Since(startTime)
 
 	return &types.CommentaryResponse{
 		Commentary:    commentary,
-		Success:       true,
-		Latency:       totalLatency,
-		Timestamp:     time.Now(),
-		ProcessingLog: request.logEntries,
-	}
-}
-
-// generateFallback generates fallback commentary when primary generation fails
-func (w *worker) generateFallback(request *generationRequest, originalErr error) *types.CommentaryResponse {
-	if !w.generator.config.EnableFallback {
-		return w.generator.errorResponse(originalErr, request.startTime)
-	}
-
-	w.logger.Warn().
-		Err(originalErr).
-		Str("input", request.request.Input.Text).
-		Msg("Primary generation failed, using fallback")
-
-	fallbackStartTime := time.Now()
-	fallbackCommentary, err := w.generator.fallback.Generate(request.request.Input)
-
-	request.logEntries = append(request.logEntries, types.LogEntry{
-		Step:      "fallback_generated",
-		Timestamp: time.Now(),
-		Duration:  time.Since(fallbackStartTime),
-		Success:   err == nil,
-		Message:   "Fallback generation attempted",
-		Data:      map[string]interface{}{"original_error": originalErr.Error()},
-	})
-
-	if err != nil {
-		return w.generator.errorResponse(fmt.Errorf("fallback failed: %w", err), request.startTime)
-	}
-
-	// Mark as fallback source
-	fallbackCommentary.Source = "fallback"
-	fallbackCommentary.Metadata.Fallbacks = []string{originalErr.Error()}
-
-	totalLatency := time.Since(request.startTime)
-
-	return &types.CommentaryResponse{
-		Commentary:    fallbackCommentary,
 		Success:       true,
 		Latency:       totalLatency,
 		Timestamp:     time.Now(),
@@ -495,8 +386,6 @@ func (g *CommentaryGenerator) updateMetrics(response *types.CommentaryResponse, 
 				g.metrics.LLMGenerated++
 			case "cache":
 				g.metrics.CacheHits++
-			case "fallback":
-				g.metrics.FallbackUsed++
 			}
 
 			// Update quality metrics
@@ -525,8 +414,6 @@ func (g *CommentaryGenerator) updateMetrics(response *types.CommentaryResponse, 
 
 func (g *CommentaryGenerator) formatForDisplay(text string) string {
 	// Basic formatting for OBS overlay
-	// In a real implementation, this would include proper text formatting,
-	// line breaks, length limits, etc.
 	if len(text) > 120 {
 		text = text[:117] + "..."
 	}
@@ -553,7 +440,7 @@ func (g *CommentaryGenerator) GetStatus() map[string]interface{} {
 		"worker_count":    g.workerCount,
 		"active_requests": atomic.LoadInt64(&g.activeRequests),
 		"queue_size":      len(g.requestChan),
-		"llm_ready":       g.llmEngine.IsReady(),
+		"llm_ready":       g.llmEngine != nil && g.llmEngine.IsReady(),
 	}
 
 	if g.llmEngine != nil {
@@ -564,10 +451,6 @@ func (g *CommentaryGenerator) GetStatus() map[string]interface{} {
 }
 
 // Utility functions
-
-func generateRequestID() string {
-	return fmt.Sprintf("req_%d", time.Now().UnixNano())
-}
 
 func generateCommentaryID() string {
 	return fmt.Sprintf("comm_%d", time.Now().UnixNano())

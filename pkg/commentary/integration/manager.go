@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 	speechtypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
-// IntegrationManager manages the integration between speech recognition and commentary generation
+// IntegrationManager manages the simplified integration between speech recognition and commentary generation
 type IntegrationManager struct {
 	// Dependencies
 	commentaryGenerator *engine.CommentaryGenerator
@@ -33,72 +32,38 @@ type IntegrationManager struct {
 	active  bool
 	metrics *IntegrationMetrics
 
-	// Match context tracking
-	matchState  *types.MatchContext
-	callHistory []TranscriptionEvent
-	maxHistory  int
-
 	// Processing control
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
 
-// IntegrationConfig configures the integration behavior
+// IntegrationConfig configures the simplified integration behavior
 type IntegrationConfig struct {
 	// Processing settings
-	EnableContextEnrichment bool          `mapstructure:"enable_context_enrichment"`
-	MaxConcurrentRequests   int           `mapstructure:"max_concurrent_requests"`
-	ProcessingTimeout       time.Duration `mapstructure:"processing_timeout"`
+	MaxConcurrentRequests int           `mapstructure:"max_concurrent_requests"`
+	ProcessingTimeout     time.Duration `mapstructure:"processing_timeout"`
 
-	// Filtering settings
-	MinConfidenceThreshold float32       `mapstructure:"min_confidence_threshold"`
-	EnableDuplicateFilter  bool          `mapstructure:"enable_duplicate_filter"`
-	DuplicateTimeWindow    time.Duration `mapstructure:"duplicate_time_window"`
-
-	// Commentary settings
-	DefaultQuality     types.QualityLevel `mapstructure:"default_quality"`
-	DefaultCachePolicy types.CachePolicy  `mapstructure:"default_cache_policy"`
-
-	// Match context settings
-	EnableScoreTracking   bool `mapstructure:"enable_score_tracking"`
-	EnableActionHistory   bool `mapstructure:"enable_action_history"`
-	HistoryRetentionCount int  `mapstructure:"history_retention_count"`
+	// Basic filtering settings
+	MinConfidenceThreshold float32 `mapstructure:"min_confidence_threshold"`
 
 	// Output settings
 	EnableMetrics         bool          `mapstructure:"enable_metrics"`
 	MetricsUpdateInterval time.Duration `mapstructure:"metrics_update_interval"`
 }
 
-// DefaultIntegrationConfig returns default configuration
+// DefaultIntegrationConfig returns simplified default configuration
 func DefaultIntegrationConfig() *IntegrationConfig {
 	return &IntegrationConfig{
-		EnableContextEnrichment: true,
-		MaxConcurrentRequests:   3,
-		ProcessingTimeout:       5 * time.Second,
-		MinConfidenceThreshold:  0.6,
-		EnableDuplicateFilter:   true,
-		DuplicateTimeWindow:     2 * time.Second,
-		DefaultQuality:          types.QualityLevelBalanced,
-		DefaultCachePolicy:      types.CachePolicyDefault,
-		EnableScoreTracking:     true,
-		EnableActionHistory:     true,
-		HistoryRetentionCount:   10,
-		EnableMetrics:           true,
-		MetricsUpdateInterval:   30 * time.Second,
+		MaxConcurrentRequests:  3,
+		ProcessingTimeout:      5 * time.Second,
+		MinConfidenceThreshold: 0.6,
+		EnableMetrics:          true,
+		MetricsUpdateInterval:  30 * time.Second,
 	}
 }
 
-// TranscriptionEvent represents a transcription with enriched context
-type TranscriptionEvent struct {
-	Transcription  *speechtypes.TranscriptionResult
-	Timestamp      time.Time
-	Processed      bool
-	Commentary     *types.Commentary
-	ProcessingTime time.Duration
-}
-
-// IntegrationMetrics tracks integration performance
+// IntegrationMetrics tracks simplified integration performance
 type IntegrationMetrics struct {
 	// Processing metrics
 	TotalTranscriptions     uint64 `json:"total_transcriptions"`
@@ -115,20 +80,15 @@ type IntegrationMetrics struct {
 	AvgOutputConfidence float32 `json:"avg_output_confidence"`
 
 	// Error metrics
-	TimeoutErrors       uint64 `json:"timeout_errors"`
-	QualityFilterErrors uint64 `json:"quality_filter_errors"`
-	GenerationErrors    uint64 `json:"generation_errors"`
-
-	// Match context
-	ScoreUpdates       uint64 `json:"score_updates"`
-	ContextEnrichments uint64 `json:"context_enrichments"`
+	TimeoutErrors    uint64 `json:"timeout_errors"`
+	GenerationErrors uint64 `json:"generation_errors"`
 
 	// Timestamp
 	LastUpdated time.Time `json:"last_updated"`
 	StartTime   time.Time `json:"start_time"`
 }
 
-// NewIntegrationManager creates a new integration manager
+// NewIntegrationManager creates a new simplified integration manager
 func NewIntegrationManager(
 	generator *engine.CommentaryGenerator,
 	config *IntegrationConfig,
@@ -144,20 +104,11 @@ func NewIntegrationManager(
 		commentaryGenerator: generator,
 		config:              config,
 		logger:              logger.With().Str("component", "integration-manager").Logger(),
-		maxHistory:          config.HistoryRetentionCount,
 		ctx:                 ctx,
 		cancel:              cancel,
 		metrics: &IntegrationMetrics{
 			StartTime:   time.Now(),
 			LastUpdated: time.Now(),
-		},
-		matchState: &types.MatchContext{
-			ScoreRed:      0,
-			ScoreBlue:     0,
-			Period:        1,
-			TimeRemaining: 3 * time.Minute, // Default match time
-			MatchPhase:    "opening",
-			Intensity:     "medium",
 		},
 	}
 }
@@ -194,7 +145,7 @@ func (im *IntegrationManager) Start(
 		Int("max_concurrent", im.config.MaxConcurrentRequests).
 		Dur("timeout", im.config.ProcessingTimeout).
 		Float32("min_confidence", im.config.MinConfidenceThreshold).
-		Msg("Integration manager started")
+		Msg("Simplified integration manager started")
 
 	return nil
 }
@@ -255,7 +206,7 @@ func (im *IntegrationManager) processTranscriptions() {
 	}
 }
 
-// processTranscription processes a single transcription
+// processTranscription processes a single transcription with simplified flow
 func (im *IntegrationManager) processTranscription(transcription *speechtypes.TranscriptionResult) {
 	startTime := time.Now()
 
@@ -269,7 +220,7 @@ func (im *IntegrationManager) processTranscription(transcription *speechtypes.Tr
 	)
 	im.mu.Unlock()
 
-	// Apply filters
+	// Apply basic confidence filter only
 	if !im.shouldProcess(transcription) {
 		im.mu.Lock()
 		im.metrics.FilteredTranscriptions++
@@ -277,44 +228,14 @@ func (im *IntegrationManager) processTranscription(transcription *speechtypes.Tr
 		return
 	}
 
-	// Create transcription event
-	event := &TranscriptionEvent{
-		Transcription: transcription,
-		Timestamp:     time.Now(),
-		Processed:     false,
-	}
-
-	// Add to history
-	im.addToHistory(event)
-
-	// Update match context
-	if im.config.EnableScoreTracking {
-		im.updateMatchContext(transcription)
-	}
-
-	// Create commentary request
+	// Create simple commentary request (no context enrichment)
 	request := &types.CommentaryRequest{
 		Input: types.TranscriptionInput{
 			Text:       transcription.Text,
 			Confidence: float32(transcription.Confidence),
-			Timestamp:  transcription.ProcessedAt, // Use ProcessedAt instead of Timestamp
-			Context:    im.getMatchContext(),
+			Timestamp:  transcription.ProcessedAt,
 		},
-		MaxLatency:  im.config.ProcessingTimeout,
-		Quality:     im.config.DefaultQuality,
-		CachePolicy: im.config.DefaultCachePolicy,
-	}
-
-	// Add basic audio metrics derived from metadata
-	// Since AudioQuality is not available directly, we derive from metadata
-	if transcription.Metadata.AudioQuality > 0 {
-		request.Input.AudioMetrics = &types.AudioQuality{
-			SignalToNoise:   float32(transcription.Metadata.AudioQuality),
-			Clarity:         float32(transcription.Metadata.AudioQuality),
-			VoiceDetection:  true,                                               // Assume voice was detected if we got transcription
-			BackgroundNoise: 1.0 - float32(transcription.Metadata.AudioQuality), // Inverse of quality
-			Distortion:      0.2,                                                // Default low distortion
-		}
+		MaxLatency: im.config.ProcessingTimeout,
 	}
 
 	// Generate commentary
@@ -324,7 +245,6 @@ func (im *IntegrationManager) processTranscription(transcription *speechtypes.Tr
 	response, err := im.commentaryGenerator.Generate(ctx, request)
 
 	processingTime := time.Since(startTime)
-	event.ProcessingTime = processingTime
 
 	if err != nil {
 		im.handleError(fmt.Errorf("commentary generation failed: %w", err))
@@ -350,10 +270,7 @@ func (im *IntegrationManager) processTranscription(transcription *speechtypes.Tr
 		return
 	}
 
-	// Update event and metrics
-	event.Commentary = response.Commentary
-	event.Processed = true
-
+	// Update metrics
 	im.mu.Lock()
 	im.metrics.ProcessedTranscriptions++
 	im.metrics.AvgProcessingTime = updateAverageDuration(
@@ -390,9 +307,9 @@ func (im *IntegrationManager) processTranscription(transcription *speechtypes.Tr
 	}
 }
 
-// shouldProcess determines if a transcription should be processed
+// shouldProcess determines if a transcription should be processed (basic confidence check only)
 func (im *IntegrationManager) shouldProcess(transcription *speechtypes.TranscriptionResult) bool {
-	// Check confidence threshold
+	// Only check confidence threshold
 	if float32(transcription.Confidence) < im.config.MinConfidenceThreshold {
 		im.logger.Debug().
 			Str("text", transcription.Text).
@@ -402,127 +319,7 @@ func (im *IntegrationManager) shouldProcess(transcription *speechtypes.Transcrip
 		return false
 	}
 
-	// Check for duplicates if enabled
-	if im.config.EnableDuplicateFilter {
-		if im.isDuplicate(transcription) {
-			im.logger.Debug().
-				Str("text", transcription.Text).
-				Msg("Transcription filtered as duplicate")
-			return false
-		}
-	}
-
 	return true
-}
-
-// isDuplicate checks if a transcription is a duplicate of recent ones
-func (im *IntegrationManager) isDuplicate(transcription *speechtypes.TranscriptionResult) bool {
-	im.mu.RLock()
-	defer im.mu.RUnlock()
-
-	cutoffTime := time.Now().Add(-im.config.DuplicateTimeWindow)
-
-	for i := len(im.callHistory) - 1; i >= 0; i-- {
-		event := im.callHistory[i]
-
-		// Stop checking if we've gone beyond the time window
-		if event.Timestamp.Before(cutoffTime) {
-			break
-		}
-
-		// Check for similar text
-		if im.isSimilarText(transcription.Text, event.Transcription.Text) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// isSimilarText checks if two texts are similar enough to be considered duplicates
-func (im *IntegrationManager) isSimilarText(text1, text2 string) bool {
-	// Simple similarity check - could be enhanced with more sophisticated algorithms
-	if text1 == text2 {
-		return true
-	}
-
-	// Check if one text is contained in the other (for partial transcriptions)
-	if len(text1) > len(text2) {
-		return len(text2) > 5 && strings.Contains(text1, text2)
-	} else {
-		return len(text1) > 5 && strings.Contains(text2, text1)
-	}
-}
-
-// updateMatchContext updates the match state based on transcription content
-func (im *IntegrationManager) updateMatchContext(transcription *speechtypes.TranscriptionResult) {
-	im.mu.Lock()
-	defer im.mu.Unlock()
-
-	text := strings.ToLower(transcription.Text)
-
-	// Update score based on keywords
-	if strings.Contains(text, "point") {
-		if strings.Contains(text, "left") || strings.Contains(text, "red") {
-			im.matchState.ScoreRed++
-			im.matchState.LastScorer = "red"
-			im.metrics.ScoreUpdates++
-		} else if strings.Contains(text, "right") || strings.Contains(text, "blue") {
-			im.matchState.ScoreBlue++
-			im.matchState.LastScorer = "blue"
-			im.metrics.ScoreUpdates++
-		}
-	}
-
-	// Update last action
-	if strings.Contains(text, "halt") {
-		im.matchState.LastAction = "halt"
-	} else if strings.Contains(text, "double") {
-		im.matchState.LastAction = "double_hit"
-	} else if strings.Contains(text, "point") {
-		im.matchState.LastAction = "point_scored"
-	} else {
-		im.matchState.LastAction = "unknown"
-	}
-
-	// Update match phase based on score
-	totalScore := im.matchState.ScoreRed + im.matchState.ScoreBlue
-	if totalScore == 0 {
-		im.matchState.MatchPhase = "opening"
-	} else if totalScore < 8 {
-		im.matchState.MatchPhase = "middle"
-	} else {
-		im.matchState.MatchPhase = "closing"
-	}
-
-	// Add to recent actions
-	if len(im.matchState.RecentActions) >= 5 {
-		im.matchState.RecentActions = im.matchState.RecentActions[1:]
-	}
-	im.matchState.RecentActions = append(im.matchState.RecentActions, transcription.Text)
-}
-
-// addToHistory adds a transcription event to the call history
-func (im *IntegrationManager) addToHistory(event *TranscriptionEvent) {
-	im.mu.Lock()
-	defer im.mu.Unlock()
-
-	im.callHistory = append(im.callHistory, *event)
-
-	// Keep only recent history
-	if len(im.callHistory) > im.maxHistory {
-		im.callHistory = im.callHistory[1:]
-	}
-}
-
-// getMatchContext returns a copy of the current match context
-func (im *IntegrationManager) getMatchContext() *types.MatchContext {
-	im.mu.RLock()
-	defer im.mu.RUnlock()
-
-	// Return a copy to avoid race conditions
-	context := *im.matchState
-	return &context
 }
 
 // handleError handles integration errors
@@ -576,11 +373,9 @@ func (im *IntegrationManager) GetStatus() map[string]interface{} {
 	defer im.mu.RUnlock()
 
 	return map[string]interface{}{
-		"active":            im.active,
-		"match_state":       im.matchState,
-		"call_history_size": len(im.callHistory),
-		"metrics":           im.metrics,
-		"config":            im.config,
+		"active":  im.active,
+		"metrics": im.metrics,
+		"config":  im.config,
 	}
 }
 

@@ -1,0 +1,5538 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+context/
+  manager_test.go
+  manager.go
+engine/
+  fallback.go
+  generator.go
+  validator.go
+integration/
+  end_to_end_test.go
+  manager.go
+prompt/
+  builder_test.go
+  builder.go
+templates/
+  base_test.go
+  base.go
+  hema_test.go
+  hema.go
+types/
+  commentary.go
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="context/manager_test.go">
+package context
+
+import (
+	"testing"
+	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestNewMatchState(t *testing.T) {
+	ms := NewMatchState()
+
+	assert.Equal(t, 1, ms.Period)
+	assert.Equal(t, 0, ms.ScoreRed)
+	assert.Equal(t, 0, ms.ScoreBlue)
+	assert.Equal(t, "0-0", ms.CurrentScore)
+	assert.Equal(t, "low", ms.MatchIntensity)
+	assert.Equal(t, "opening", ms.MatchPhase)
+	assert.Equal(t, "neutral", ms.Momentum)
+	assert.Equal(t, time.Minute*3, ms.TimeRemaining)
+}
+
+func TestMatchState_UpdateScore(t *testing.T) {
+	ms := NewMatchState()
+
+	// Test red scorer
+	ms.UpdateScore("red")
+	assert.Equal(t, 1, ms.ScoreRed)
+	assert.Equal(t, 0, ms.ScoreBlue)
+	assert.Equal(t, "1-0", ms.CurrentScore)
+	assert.Equal(t, "red", ms.LastScorer)
+	assert.Equal(t, "red", ms.Momentum)
+	assert.Contains(t, ms.LastAction, "Point scored by red")
+
+	// Test blue scorer
+	ms.UpdateScore("blue")
+	assert.Equal(t, 1, ms.ScoreRed)
+	assert.Equal(t, 1, ms.ScoreBlue)
+	assert.Equal(t, "1-1", ms.CurrentScore)
+	assert.Equal(t, "blue", ms.LastScorer)
+	assert.Equal(t, "blue", ms.Momentum)
+}
+
+func TestMatchState_UpdateAction(t *testing.T) {
+	ms := NewMatchState()
+
+	ms.UpdateAction("Halt called")
+	assert.Equal(t, "Halt called", ms.LastAction)
+}
+
+func TestMatchState_UpdateTime(t *testing.T) {
+	ms := NewMatchState()
+
+	newTime := time.Minute * 2
+	ms.UpdateTime(newTime)
+	assert.Equal(t, newTime, ms.TimeRemaining)
+}
+
+func TestMatchState_IsMatchEnd(t *testing.T) {
+	ms := NewMatchState()
+
+	// Not ended initially
+	assert.False(t, ms.IsMatchEnd())
+
+	// Ended by left score
+	ms.ScoreRed = 5
+	assert.True(t, ms.IsMatchEnd())
+
+	// Reset and test right score
+	ms.ScoreRed = 0
+	ms.ScoreBlue = 5
+	assert.True(t, ms.IsMatchEnd())
+
+	// Reset and test time
+	ms.ScoreBlue = 0
+	ms.TimeRemaining = 0
+	assert.True(t, ms.IsMatchEnd())
+}
+
+func TestMatchState_GetScoreDifference(t *testing.T) {
+	ms := NewMatchState()
+
+	assert.Equal(t, 0, ms.GetScoreDifference())
+
+	ms.ScoreRed = 3
+	ms.ScoreBlue = 1
+	assert.Equal(t, 2, ms.GetScoreDifference())
+
+	ms.ScoreRed = 1
+	ms.ScoreBlue = 4
+	assert.Equal(t, 3, ms.GetScoreDifference())
+}
+
+func TestMatchState_GetLeader(t *testing.T) {
+	ms := NewMatchState()
+
+	assert.Equal(t, "tied", ms.GetLeader())
+
+	ms.ScoreRed = 3
+	assert.Equal(t, "red", ms.GetLeader())
+
+	ms.ScoreBlue = 4
+	assert.Equal(t, "blue", ms.GetLeader())
+
+	ms.ScoreBlue = 3
+	assert.Equal(t, "tied", ms.GetLeader())
+}
+
+func TestMatchState_ThreadSafety(t *testing.T) {
+	ms := NewMatchState()
+
+	// Test concurrent access
+	done := make(chan bool, 2)
+
+	go func() {
+		for i := 0; i < 10; i++ {
+			ms.UpdateScore("red")
+		}
+		done <- true
+	}()
+
+	go func() {
+		for i := 0; i < 10; i++ {
+			state := ms.GetState()
+			assert.NotNil(t, state)
+		}
+		done <- true
+	}()
+
+	// Wait for both goroutines
+	<-done
+	<-done
+
+	// Verify final state
+	assert.Equal(t, 10, ms.ScoreRed)
+}
+
+func TestRingBuffer(t *testing.T) {
+	rb := NewRingBuffer(3)
+
+	// Test empty buffer
+	assert.Empty(t, rb.GetRecent(5))
+	assert.Empty(t, rb.GetAll())
+
+	// Add items
+	rb.Add("call1")
+	rb.Add("call2")
+	rb.Add("call3")
+
+	recent := rb.GetRecent(2)
+	assert.Len(t, recent, 2)
+	assert.Equal(t, "call3", recent[0]) // Most recent first
+	assert.Equal(t, "call2", recent[1])
+
+	all := rb.GetAll()
+	assert.Len(t, all, 3)
+	assert.Equal(t, "call1", all[0]) // Chronological order
+	assert.Equal(t, "call2", all[1])
+	assert.Equal(t, "call3", all[2])
+
+	// Test buffer overflow
+	rb.Add("call4")
+	all = rb.GetAll()
+	assert.Len(t, all, 3)
+	assert.Equal(t, "call2", all[0]) // call1 should be overwritten
+	assert.Equal(t, "call3", all[1])
+	assert.Equal(t, "call4", all[2])
+}
+
+func TestRingBuffer_EdgeCases(t *testing.T) {
+	rb := NewRingBuffer(2)
+
+	// Test getting more items than exist
+	rb.Add("item1")
+	recent := rb.GetRecent(5)
+	assert.Len(t, recent, 1)
+	assert.Equal(t, "item1", recent[0])
+
+	// Test zero/negative requests
+	assert.Empty(t, rb.GetRecent(0))
+	assert.Empty(t, rb.GetRecent(-1))
+}
+
+func TestNewContextManager(t *testing.T) {
+	logger := zerolog.Nop()
+	cm := NewContextManager(logger)
+
+	assert.NotNil(t, cm.matchState)
+	assert.NotNil(t, cm.recentCalls)
+	assert.NotNil(t, cm.contextData)
+}
+
+func TestContextManager_MatchState(t *testing.T) {
+	logger := zerolog.Nop()
+	cm := NewContextManager(logger)
+
+	// Get initial state
+	state := cm.GetMatchState()
+	assert.NotNil(t, state)
+	assert.Equal(t, 0, state.ScoreRed)
+
+	// Update state
+	newState := NewMatchState()
+	newState.ScoreRed = 3
+	newState.ScoreBlue = 2
+	cm.UpdateMatchState(newState)
+
+	retrievedState := cm.GetMatchState()
+	assert.Equal(t, 3, retrievedState.ScoreRed)
+	assert.Equal(t, 2, retrievedState.ScoreBlue)
+}
+
+func TestContextManager_Calls(t *testing.T) {
+	logger := zerolog.Nop()
+	cm := NewContextManager(logger)
+
+	// Add calls
+	cm.AddCall("Point red")
+	cm.AddCall("Halt")
+	cm.AddCall("Point blue")
+
+	recent := cm.GetRecentCalls(2)
+	assert.Len(t, recent, 2)
+	assert.Equal(t, "Point blue", recent[0])
+	assert.Equal(t, "Halt", recent[1])
+}
+
+func TestContextManager_Context(t *testing.T) {
+	logger := zerolog.Nop()
+	cm := NewContextManager(logger)
+
+	// Set context values
+	cm.SetContext("test_key", "test_value")
+	cm.SetContext("another_key", "another_value")
+
+	// Get individual values
+	value, exists := cm.GetContext("test_key")
+	assert.True(t, exists)
+	assert.Equal(t, "test_value", value)
+
+	_, exists = cm.GetContext("nonexistent_key")
+	assert.False(t, exists)
+
+	// Get all context
+	allContext := cm.GetAllContext()
+	assert.Len(t, allContext, 2)
+	assert.Equal(t, "test_value", allContext["test_key"])
+	assert.Equal(t, "another_value", allContext["another_key"])
+}
+
+func TestContextManager_EnrichContext(t *testing.T) {
+	logger := zerolog.Nop()
+	cm := NewContextManager(logger)
+
+	// Set up match state
+	matchState := NewMatchState()
+	matchState.ScoreRed = 3
+	matchState.ScoreBlue = 1
+	matchState.CurrentScore = "3-1" // Update the current score to match the individual scores
+	matchState.TimeRemaining = time.Second * 30
+	cm.UpdateMatchState(matchState)
+
+	// Add some recent calls with patterns
+	cm.AddCall("double hit")
+	cm.AddCall("double hit")
+	cm.AddCall("point red")
+
+	enriched := cm.EnrichContext("Point scored")
+
+	// Check enriched context
+	assert.Contains(t, enriched, "match_phase")
+	assert.Contains(t, enriched, "match_intensity")
+	assert.Contains(t, enriched, "momentum")
+	assert.Contains(t, enriched, "score_situation")
+	assert.Contains(t, enriched, "time_pressure")
+
+	assert.Equal(t, "3-1", enriched["score_situation"])
+	assert.Equal(t, "high", enriched["time_pressure"]) // < 1 minute
+	assert.Contains(t, enriched, "recent_pattern")
+}
+
+func TestContextManager_ThreadSafety(t *testing.T) {
+	logger := zerolog.Nop()
+	cm := NewContextManager(logger)
+
+	// Test concurrent access to different methods
+	done := make(chan bool, 3)
+
+	go func() {
+		for i := 0; i < 10; i++ {
+			cm.SetContext("key1", "value1")
+		}
+		done <- true
+	}()
+
+	go func() {
+		for i := 0; i < 10; i++ {
+			cm.AddCall("test call")
+		}
+		done <- true
+	}()
+
+	go func() {
+		for i := 0; i < 10; i++ {
+			_ = cm.GetAllContext()
+			_ = cm.GetRecentCalls(5)
+		}
+		done <- true
+	}()
+
+	// Wait for all goroutines
+	for i := 0; i < 3; i++ {
+		<-done
+	}
+
+	// Verify no race conditions occurred
+	context := cm.GetAllContext()
+	assert.Contains(t, context, "key1")
+
+	calls := cm.GetRecentCalls(5)
+	assert.NotEmpty(t, calls)
+}
+
+// Benchmark tests
+func BenchmarkMatchState_UpdateScore(b *testing.B) {
+	ms := NewMatchState()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scorer := "red"
+		if i%2 == 1 {
+			scorer = "blue"
+		}
+		ms.UpdateScore(scorer)
+	}
+}
+
+func BenchmarkRingBuffer_Add(b *testing.B) {
+	rb := NewRingBuffer(100)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rb.Add("test call")
+	}
+}
+
+func BenchmarkContextManager_EnrichContext(b *testing.B) {
+	logger := zerolog.Nop()
+	cm := NewContextManager(logger)
+
+	// Setup
+	matchState := NewMatchState()
+	matchState.ScoreRed = 2
+	matchState.ScoreBlue = 1
+	cm.UpdateMatchState(matchState)
+
+	for i := 0; i < 5; i++ {
+		cm.AddCall("test call")
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cm.EnrichContext("Point scored")
+	}
+}
+</file>
+
+<file path="context/manager.go">
+package context
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/rs/zerolog"
+)
+
+// MatchState represents the current state of a HEMA match
+type MatchState struct {
+	mu             sync.RWMutex
+	ScoreRed       int           `json:"score_red"`
+	ScoreBlue      int           `json:"score_blue"`
+	Period         int           `json:"period"`
+	TimeRemaining  time.Duration `json:"time_remaining"`
+	LastAction     string        `json:"last_action"`
+	LastScorer     string        `json:"last_scorer"` // "red", "blue", or ""
+	CurrentScore   string        `json:"current_score"`
+	MatchIntensity string        `json:"match_intensity"` // "low", "medium", "high"
+	TotalDuration  time.Duration `json:"total_duration"`
+	StartTime      time.Time     `json:"start_time"`
+	LastUpdateTime time.Time     `json:"last_update_time"`
+	MatchPhase     string        `json:"match_phase"` // "opening", "middle", "closing"
+	Momentum       string        `json:"momentum"`    // "red", "blue", "neutral"
+}
+
+// NewMatchState creates a new match state with default values
+func NewMatchState() *MatchState {
+	now := time.Now()
+	return &MatchState{
+		Period:         1,
+		TimeRemaining:  time.Minute * 3, // Standard HEMA bout time
+		CurrentScore:   "0-0",
+		MatchIntensity: "low",
+		StartTime:      now,
+		LastUpdateTime: now,
+		MatchPhase:     "opening",
+		Momentum:       "neutral",
+	}
+}
+
+// UpdateScore updates the match score and related state
+func (ms *MatchState) UpdateScore(scorer string) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	ms.LastScorer = scorer
+	ms.LastAction = fmt.Sprintf("Point scored by %s", scorer)
+	ms.LastUpdateTime = time.Now()
+
+	switch scorer {
+	case "red":
+		ms.ScoreRed++
+	case "blue":
+		ms.ScoreBlue++
+	}
+
+	ms.CurrentScore = fmt.Sprintf("%d-%d", ms.ScoreRed, ms.ScoreBlue)
+	ms.updateMatchIntensity()
+	ms.updateMatchPhase()
+	ms.updateMomentum()
+}
+
+// UpdateAction updates the last action without scoring
+func (ms *MatchState) UpdateAction(action string) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	ms.LastAction = action
+	ms.LastUpdateTime = time.Now()
+	ms.updateMatchIntensity()
+}
+
+// UpdateTime updates the remaining time in the match
+func (ms *MatchState) UpdateTime(remaining time.Duration) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	ms.TimeRemaining = remaining
+	ms.LastUpdateTime = time.Now()
+	ms.updateMatchPhase()
+}
+
+// GetState returns a thread-safe copy of the current match state
+func (ms *MatchState) GetState() MatchState {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	return *ms
+}
+
+// IsMatchEnd returns true if the match should end
+func (ms *MatchState) IsMatchEnd() bool {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	// Standard HEMA rules: first to 5 points or time runs out
+	return ms.ScoreRed >= 5 || ms.ScoreBlue >= 5 || ms.TimeRemaining <= 0
+}
+
+// GetScoreDifference returns the absolute score difference
+func (ms *MatchState) GetScoreDifference() int {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	if ms.ScoreRed > ms.ScoreBlue {
+		return ms.ScoreRed - ms.ScoreBlue
+	}
+	return ms.ScoreBlue - ms.ScoreRed
+}
+
+// GetLeader returns who is currently leading
+func (ms *MatchState) GetLeader() string {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	if ms.ScoreRed > ms.ScoreBlue {
+		return "red"
+	} else if ms.ScoreBlue > ms.ScoreRed {
+		return "blue"
+	}
+	return "tied"
+}
+
+// updateMatchIntensity updates the match intensity based on score and time
+// Note: This method assumes the caller already holds a lock
+func (ms *MatchState) updateMatchIntensity() {
+	scoreDiff := ms.getScoreDifferenceUnsafe()
+	timeElapsed := time.Since(ms.StartTime)
+	totalTime := ms.TotalDuration
+	if totalTime == 0 {
+		totalTime = time.Minute * 3 // Default match time
+	}
+
+	// Calculate intensity based on multiple factors
+	if ms.TimeRemaining < time.Minute && scoreDiff <= 1 {
+		ms.MatchIntensity = "high"
+	} else if scoreDiff >= 3 || timeElapsed < time.Second*30 {
+		ms.MatchIntensity = "low"
+	} else {
+		ms.MatchIntensity = "medium"
+	}
+}
+
+// getScoreDifferenceUnsafe returns the absolute score difference without locking
+// Note: This method assumes the caller already holds a lock
+func (ms *MatchState) getScoreDifferenceUnsafe() int {
+	if ms.ScoreRed > ms.ScoreBlue {
+		return ms.ScoreRed - ms.ScoreBlue
+	}
+	return ms.ScoreBlue - ms.ScoreRed
+}
+
+// updateMatchPhase updates the current phase of the match
+func (ms *MatchState) updateMatchPhase() {
+	totalTime := ms.TotalDuration
+	if totalTime == 0 {
+		totalTime = time.Minute * 3 // Default match time
+	}
+
+	elapsed := time.Since(ms.StartTime)
+
+	if elapsed < totalTime/3 {
+		ms.MatchPhase = "opening"
+	} else if elapsed < totalTime*2/3 {
+		ms.MatchPhase = "middle"
+	} else {
+		ms.MatchPhase = "closing"
+	}
+}
+
+// updateMomentum updates the momentum based on recent scoring
+func (ms *MatchState) updateMomentum() {
+	// Simple momentum calculation based on last scorer
+	// In a more sophisticated system, this would track scoring patterns
+	if ms.LastScorer == "red" {
+		ms.Momentum = "red"
+	} else if ms.LastScorer == "blue" {
+		ms.Momentum = "blue"
+	} else {
+		ms.Momentum = "neutral"
+	}
+}
+
+// RingBuffer represents a circular buffer for recent calls
+type RingBuffer struct {
+	mu     sync.RWMutex
+	buffer []string
+	size   int
+	index  int
+	full   bool
+}
+
+// NewRingBuffer creates a new ring buffer with the specified size
+func NewRingBuffer(size int) *RingBuffer {
+	return &RingBuffer{
+		buffer: make([]string, size),
+		size:   size,
+	}
+}
+
+// Add adds a new item to the ring buffer
+func (rb *RingBuffer) Add(item string) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+
+	rb.buffer[rb.index] = item
+	rb.index = (rb.index + 1) % rb.size
+	if rb.index == 0 {
+		rb.full = true
+	}
+}
+
+// GetRecent returns the most recent items (up to count)
+func (rb *RingBuffer) GetRecent(count int) []string {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+
+	if count <= 0 {
+		return nil
+	}
+
+	actualSize := rb.size
+	if !rb.full {
+		actualSize = rb.index
+	}
+
+	if count > actualSize {
+		count = actualSize
+	}
+
+	result := make([]string, count)
+
+	for i := 0; i < count; i++ {
+		pos := (rb.index - 1 - i + rb.size) % rb.size
+		if pos >= 0 && pos < len(rb.buffer) {
+			result[i] = rb.buffer[pos]
+		}
+	}
+
+	return result
+}
+
+// GetAll returns all items in the buffer in chronological order
+func (rb *RingBuffer) GetAll() []string {
+	rb.mu.RLock()
+	defer rb.mu.RUnlock()
+
+	if !rb.full && rb.index == 0 {
+		return nil
+	}
+
+	size := rb.size
+	if !rb.full {
+		size = rb.index
+	}
+
+	result := make([]string, size)
+
+	if rb.full {
+		// Copy from current index to end
+		copy(result, rb.buffer[rb.index:])
+		// Copy from beginning to current index
+		copy(result[rb.size-rb.index:], rb.buffer[:rb.index])
+	} else {
+		// Copy from beginning to current index
+		copy(result, rb.buffer[:rb.index])
+	}
+
+	return result
+}
+
+// ContextManager manages match context and call history
+type ContextManager struct {
+	mu          sync.RWMutex
+	matchState  *MatchState
+	recentCalls *RingBuffer
+	logger      zerolog.Logger
+	contextData map[string]string
+}
+
+// NewContextManager creates a new context manager
+func NewContextManager(logger zerolog.Logger) *ContextManager {
+	return &ContextManager{
+		matchState:  NewMatchState(),
+		recentCalls: NewRingBuffer(10), // Keep last 10 calls
+		logger:      logger.With().Str("component", "context").Logger(),
+		contextData: make(map[string]string),
+	}
+}
+
+// UpdateMatchState updates the current match state
+func (cm *ContextManager) UpdateMatchState(state *MatchState) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.matchState = state
+}
+
+// GetMatchState returns a thread-safe copy of the match state
+func (cm *ContextManager) GetMatchState() *MatchState {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if cm.matchState == nil {
+		return NewMatchState()
+	}
+
+	state := cm.matchState.GetState()
+	return &state
+}
+
+// AddCall adds a new call to the recent calls buffer
+func (cm *ContextManager) AddCall(call string) {
+	cm.recentCalls.Add(call)
+	cm.logger.Debug().Str("call", call).Msg("Added call to context")
+}
+
+// GetRecentCalls returns recent calls from the buffer
+func (cm *ContextManager) GetRecentCalls(count int) []string {
+	return cm.recentCalls.GetRecent(count)
+}
+
+// SetContext sets a context value
+func (cm *ContextManager) SetContext(key, value string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.contextData[key] = value
+}
+
+// GetContext gets a context value
+func (cm *ContextManager) GetContext(key string) (string, bool) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	value, exists := cm.contextData[key]
+	return value, exists
+}
+
+// GetAllContext returns all context data
+func (cm *ContextManager) GetAllContext() map[string]string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	result := make(map[string]string)
+	for k, v := range cm.contextData {
+		result[k] = v
+	}
+	return result
+}
+
+// EnrichContext enriches context based on current match state and call history
+func (cm *ContextManager) EnrichContext(transcription string) map[string]string {
+	context := cm.GetAllContext()
+	state := cm.GetMatchState()
+
+	// Add match phase information
+	context["match_phase"] = state.MatchPhase
+	context["match_intensity"] = state.MatchIntensity
+	context["momentum"] = state.Momentum
+
+	// Add score situation
+	context["score_situation"] = state.CurrentScore
+	if state.IsMatchEnd() {
+		context["match_status"] = "ending"
+	}
+
+	// Add time context
+	if state.TimeRemaining < time.Minute {
+		context["time_pressure"] = "high"
+	} else if state.TimeRemaining < time.Minute*2 {
+		context["time_pressure"] = "medium"
+	} else {
+		context["time_pressure"] = "low"
+	}
+
+	// Analyze recent call patterns
+	recentCalls := cm.GetRecentCalls(3)
+	if len(recentCalls) > 1 {
+		// Look for patterns in recent calls
+		if containsPattern(recentCalls, "double") {
+			context["recent_pattern"] = "double_hits"
+		} else if containsPattern(recentCalls, "point") {
+			context["recent_pattern"] = "active_scoring"
+		}
+	}
+
+	return context
+}
+
+// containsPattern checks if recent calls contain a specific pattern
+func containsPattern(calls []string, pattern string) bool {
+	count := 0
+	for _, call := range calls {
+		if contains(call, pattern) {
+			count++
+		}
+	}
+	return count >= 2 // Pattern if appears in 2+ recent calls
+}
+
+// contains checks if a string contains a substring (case-insensitive)
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) &&
+		(s == substr ||
+			(len(s) > len(substr) &&
+				(s[:len(substr)] == substr ||
+					s[len(s)-len(substr):] == substr ||
+					containsSubstring(s, substr))))
+}
+
+// containsSubstring performs a simple substring search
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+</file>
+
+<file path="engine/fallback.go">
+package engine
+
+import (
+	"fmt"
+	"math/rand"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/types"
+)
+
+// FallbackGenerator generates fallback commentary using rule-based templates
+type FallbackGenerator struct {
+	config           *types.CommentaryConfig
+	logger           zerolog.Logger
+	rules            []FallbackRule
+	templateLibrary  map[string][]string
+	recentResponses  []string // Track recent responses for variety
+	maxRecentHistory int
+	randomizer       *rand.Rand
+}
+
+// FallbackRule represents a pattern-matching rule for fallback generation
+type FallbackRule struct {
+	Pattern       *regexp.Regexp
+	Keywords      []string
+	Templates     []string
+	Category      string
+	Priority      int
+	Confidence    float32
+	MinConfidence float32 // Minimum input confidence required for this rule
+}
+
+// NewFallbackGenerator creates a new fallback generator
+func NewFallbackGenerator(config *types.CommentaryConfig, logger zerolog.Logger) (*FallbackGenerator, error) {
+	generator := &FallbackGenerator{
+		config:           config,
+		logger:           logger.With().Str("component", "fallback-generator").Logger(),
+		recentResponses:  make([]string, 0),
+		maxRecentHistory: 10,
+		randomizer:       rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+
+	// Initialize rules and templates
+	generator.initializeRules()
+	generator.initializeTemplates()
+
+	return generator, nil
+}
+
+// Generate generates fallback commentary for the given input
+func (fg *FallbackGenerator) Generate(input types.TranscriptionInput) (*types.Commentary, error) {
+	startTime := time.Now()
+
+	// Find matching rules
+	matchingRules := fg.findMatchingRules(input.Text, input.Confidence)
+
+	if len(matchingRules) == 0 {
+		// Use generic fallback
+		return fg.generateGenericFallback(input, startTime), nil
+	}
+
+	// Select best rule based on priority and confidence
+	selectedRule := fg.selectBestRule(matchingRules)
+
+	// Generate commentary using the selected rule
+	commentary := fg.generateFromRule(selectedRule, input, startTime)
+
+	// Add to recent responses for variety tracking
+	fg.addToRecent(commentary.Text)
+
+	return commentary, nil
+}
+
+// findMatchingRules finds rules that match the input transcription
+func (fg *FallbackGenerator) findMatchingRules(transcription string, confidence float32) []FallbackRule {
+	var matching []FallbackRule
+	lowerText := strings.ToLower(transcription)
+
+	for _, rule := range fg.rules {
+		// Check minimum confidence requirement
+		if confidence < rule.MinConfidence {
+			continue
+		}
+
+		// Check pattern match
+		if rule.Pattern != nil && rule.Pattern.MatchString(lowerText) {
+			matching = append(matching, rule)
+			continue
+		}
+
+		// Check keyword match
+		keywordMatches := 0
+		for _, keyword := range rule.Keywords {
+			if strings.Contains(lowerText, strings.ToLower(keyword)) {
+				keywordMatches++
+			}
+		}
+
+		// Require at least one keyword match for keyword-based rules
+		if len(rule.Keywords) > 0 && keywordMatches > 0 {
+			// Adjust rule confidence based on keyword match ratio
+			matchRatio := float32(keywordMatches) / float32(len(rule.Keywords))
+			adjustedRule := rule
+			adjustedRule.Confidence = rule.Confidence * matchRatio
+			matching = append(matching, adjustedRule)
+		}
+	}
+
+	return matching
+}
+
+// selectBestRule selects the best matching rule based on priority and confidence
+func (fg *FallbackGenerator) selectBestRule(rules []FallbackRule) FallbackRule {
+	if len(rules) == 1 {
+		return rules[0]
+	}
+
+	// Sort by priority first, then by confidence
+	bestRule := rules[0]
+	bestScore := float32(bestRule.Priority)*10 + bestRule.Confidence
+
+	for _, rule := range rules[1:] {
+		score := float32(rule.Priority)*10 + rule.Confidence
+		if score > bestScore {
+			bestRule = rule
+			bestScore = score
+		}
+	}
+
+	return bestRule
+}
+
+// generateFromRule generates commentary using a specific rule
+func (fg *FallbackGenerator) generateFromRule(rule FallbackRule, input types.TranscriptionInput, startTime time.Time) *types.Commentary {
+	// Select template with variety consideration
+	template := fg.selectTemplate(rule.Templates, rule.Category)
+
+	// Replace variables in template
+	text := fg.populateTemplate(template, input)
+
+	// Create commentary object
+	commentary := &types.Commentary{
+		ID:          generateCommentaryID(),
+		Text:        text,
+		DisplayText: fg.formatForDisplay(text),
+		Source:      "fallback",
+		Confidence:  rule.Confidence,
+		Timestamp:   time.Now(),
+
+		InputText:       input.Text,
+		InputConfidence: input.Confidence,
+		TemplateID:      rule.Category,
+
+		GenerationLatency: time.Since(startTime),
+		CacheHit:          false,
+
+		QualityScore:     rule.Confidence,
+		RelevanceScore:   rule.Confidence,
+		ValidationPassed: true, // Fallback content is pre-validated
+
+		Metadata: types.CommentaryMetadata{
+			Category:        rule.Category,
+			Priority:        "medium", // Fallback is always medium priority
+			TargetTone:      "neutral",
+			ProcessingSteps: []string{"fallback_generation"},
+			Fallbacks:       []string{"rule_based_fallback"},
+			ExtraData:       make(map[string]string),
+		},
+	}
+
+	// Add match context if available
+	if input.Context != nil {
+		commentary.Metadata.MatchContext = input.Context
+	}
+
+	return commentary
+}
+
+// generateGenericFallback generates a generic fallback when no rules match
+func (fg *FallbackGenerator) generateGenericFallback(input types.TranscriptionInput, startTime time.Time) *types.Commentary {
+	// Generic templates for unknown situations
+	genericTemplates := []string{
+		"The director makes a call.",
+		"An action takes place on the piste.",
+		"The fencers continue their bout.",
+		"The match proceeds.",
+	}
+
+	template := genericTemplates[fg.randomizer.Intn(len(genericTemplates))]
+	text := fg.populateTemplate(template, input)
+
+	return &types.Commentary{
+		ID:          generateCommentaryID(),
+		Text:        text,
+		DisplayText: fg.formatForDisplay(text),
+		Source:      "fallback",
+		Confidence:  0.3, // Low confidence for generic fallback
+		Timestamp:   time.Now(),
+
+		InputText:       input.Text,
+		InputConfidence: input.Confidence,
+		TemplateID:      "generic_fallback",
+
+		GenerationLatency: time.Since(startTime),
+		CacheHit:          false,
+
+		QualityScore:     0.3,
+		RelevanceScore:   0.2,
+		ValidationPassed: true,
+
+		Metadata: types.CommentaryMetadata{
+			Category:        "generic",
+			Priority:        "low",
+			TargetTone:      "neutral",
+			ProcessingSteps: []string{"generic_fallback"},
+			Fallbacks:       []string{"generic_template"},
+			ExtraData:       make(map[string]string),
+		},
+	}
+}
+
+// selectTemplate selects a template with variety consideration
+func (fg *FallbackGenerator) selectTemplate(templates []string, category string) string {
+	if len(templates) == 0 {
+		return "The action continues."
+	}
+
+	if len(templates) == 1 {
+		return templates[0]
+	}
+
+	// Filter out recently used templates for variety
+	available := make([]string, 0)
+	for _, template := range templates {
+		if !fg.wasRecentlyUsed(template) {
+			available = append(available, template)
+		}
+	}
+
+	// If all templates were recently used, use all of them
+	if len(available) == 0 {
+		available = templates
+	}
+
+	// Select random template from available options
+	return available[fg.randomizer.Intn(len(available))]
+}
+
+// populateTemplate replaces variables in templates with actual values
+func (fg *FallbackGenerator) populateTemplate(template string, input types.TranscriptionInput) string {
+	text := template
+
+	// Replace common variables
+	text = strings.ReplaceAll(text, "{{transcription}}", input.Text)
+
+	if input.Context != nil {
+		text = strings.ReplaceAll(text, "{{score_red}}", fmt.Sprintf("%d", input.Context.ScoreRed))
+		text = strings.ReplaceAll(text, "{{score_blue}}", fmt.Sprintf("%d", input.Context.ScoreBlue))
+		text = strings.ReplaceAll(text, "{{current_score}}", fmt.Sprintf("%d-%d", input.Context.ScoreRed, input.Context.ScoreBlue))
+		text = strings.ReplaceAll(text, "{{last_scorer}}", input.Context.LastScorer)
+		text = strings.ReplaceAll(text, "{{period}}", fmt.Sprintf("%d", input.Context.Period))
+	}
+
+	// Replace with default values if context is not available
+	text = strings.ReplaceAll(text, "{{score_red}}", "0")
+	text = strings.ReplaceAll(text, "{{score_blue}}", "0")
+	text = strings.ReplaceAll(text, "{{current_score}}", "0-0")
+	text = strings.ReplaceAll(text, "{{last_scorer}}", "")
+	text = strings.ReplaceAll(text, "{{period}}", "1")
+
+	return text
+}
+
+// wasRecentlyUsed checks if a template was recently used
+func (fg *FallbackGenerator) wasRecentlyUsed(template string) bool {
+	for _, recent := range fg.recentResponses {
+		compareLength := len(template)
+		if compareLength > 20 {
+			compareLength = 20
+		}
+		if strings.Contains(recent, template[:compareLength]) {
+			return true
+		}
+	}
+	return false
+}
+
+// addToRecent adds a response to the recent history
+func (fg *FallbackGenerator) addToRecent(response string) {
+	fg.recentResponses = append(fg.recentResponses, response)
+
+	// Keep only the most recent responses
+	if len(fg.recentResponses) > fg.maxRecentHistory {
+		fg.recentResponses = fg.recentResponses[1:]
+	}
+}
+
+// formatForDisplay formats text for display (same logic as in generator.go)
+func (fg *FallbackGenerator) formatForDisplay(text string) string {
+	if len(text) > 120 {
+		text = text[:117] + "..."
+	}
+	return text
+}
+
+// initializeRules sets up the pattern-matching rules for fallback generation
+func (fg *FallbackGenerator) initializeRules() {
+	fg.rules = []FallbackRule{
+		// Point scoring rules
+		{
+			Pattern:       regexp.MustCompile(`\b(point|score|touch|hit).*(left|right|red|blue)\b`),
+			Keywords:      []string{"point", "score", "touch", "hit", "left", "right", "red", "blue"},
+			Templates:     fg.templateLibrary["point_scored"],
+			Category:      "scoring",
+			Priority:      10,
+			Confidence:    0.8,
+			MinConfidence: 0.5,
+		},
+		// Double hit rules
+		{
+			Pattern:       regexp.MustCompile(`\b(double|both|simultaneous)\b`),
+			Keywords:      []string{"double", "both", "simultaneous"},
+			Templates:     fg.templateLibrary["double_hit"],
+			Category:      "rules",
+			Priority:      9,
+			Confidence:    0.75,
+			MinConfidence: 0.6,
+		},
+		// No point rules
+		{
+			Pattern:       regexp.MustCompile(`\b(no.?point|nothing|miss|parry)\b`),
+			Keywords:      []string{"no point", "nothing", "miss", "parry"},
+			Templates:     fg.templateLibrary["no_point"],
+			Category:      "neutral",
+			Priority:      7,
+			Confidence:    0.7,
+			MinConfidence: 0.5,
+		},
+		// Halt rules
+		{
+			Pattern:       regexp.MustCompile(`\b(halt|stop|break|pause)\b`),
+			Keywords:      []string{"halt", "stop", "break", "pause"},
+			Templates:     fg.templateLibrary["halt"],
+			Category:      "control",
+			Priority:      8,
+			Confidence:    0.9,
+			MinConfidence: 0.7,
+		},
+		// Warning/Card rules
+		{
+			Pattern:       regexp.MustCompile(`\b(card|warning|yellow|red|penalty)\b`),
+			Keywords:      []string{"card", "warning", "yellow", "red", "penalty"},
+			Templates:     fg.templateLibrary["card_warning"],
+			Category:      "discipline",
+			Priority:      9,
+			Confidence:    0.8,
+			MinConfidence: 0.6,
+		},
+		// Afterblow rules
+		{
+			Pattern:       regexp.MustCompile(`\b(afterblow|after|counter)\b`),
+			Keywords:      []string{"afterblow", "after", "counter"},
+			Templates:     fg.templateLibrary["afterblow"],
+			Category:      "rules",
+			Priority:      8,
+			Confidence:    0.75,
+			MinConfidence: 0.6,
+		},
+		// Match end rules
+		{
+			Pattern:       regexp.MustCompile(`\b(match|bout|end|finish|victory|win)\b`),
+			Keywords:      []string{"match", "bout", "end", "finish", "victory", "win"},
+			Templates:     fg.templateLibrary["match_end"],
+			Category:      "conclusion",
+			Priority:      10,
+			Confidence:    0.8,
+			MinConfidence: 0.7,
+		},
+	}
+}
+
+// initializeTemplates sets up the template library for fallback generation
+func (fg *FallbackGenerator) initializeTemplates() {
+	fg.templateLibrary = map[string][]string{
+		"point_scored": {
+			"A point is awarded.",
+			"The score changes.",
+			"A successful hit connects.",
+			"The touch is acknowledged.",
+			"A clean point is scored.",
+		},
+		"double_hit": {
+			"Both fencers hit simultaneously.",
+			"A double touch occurs.",
+			"No point awarded for the double hit.",
+			"The exchange results in a double.",
+		},
+		"no_point": {
+			"No point is awarded.",
+			"The action results in no score.",
+			"The attempt is unsuccessful.",
+			"No touch is registered.",
+		},
+		"halt": {
+			"The match is halted.",
+			"Action is stopped.",
+			"The director calls halt.",
+			"Play is paused.",
+		},
+		"card_warning": {
+			"A warning is issued.",
+			"Disciplinary action is taken.",
+			"The director shows a card.",
+			"A penalty is awarded.",
+		},
+		"afterblow": {
+			"An afterblow is called.",
+			"A counter-attack lands.",
+			"The riposte connects after the initial hit.",
+		},
+		"match_end": {
+			"The match concludes.",
+			"The bout is finished.",
+			"Victory is decided.",
+			"The final result is determined.",
+		},
+	}
+}
+</file>
+
+<file path="engine/generator.go">
+package engine
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/prompt"
+	"github.com/your-org/hema-replay-system/pkg/commentary/templates"
+	"github.com/your-org/hema-replay-system/pkg/commentary/types"
+	llmtypes "github.com/your-org/hema-replay-system/pkg/llm/types"
+)
+
+// CommentaryGenerator orchestrates the commentary generation pipeline
+type CommentaryGenerator struct {
+	// Dependencies
+	llmEngine     llmtypes.EngineInterface
+	promptBuilder *prompt.Builder
+	validator     *QualityValidator
+	fallback      *FallbackGenerator
+
+	// Configuration
+	config *types.CommentaryConfig
+	logger zerolog.Logger
+
+	// State management
+	mu             sync.RWMutex
+	active         bool
+	metrics        *types.GenerationMetrics
+	activeRequests int64
+
+	// Request management
+	requestChan chan *generationRequest
+	workers     []*worker
+	workerCount int
+
+	// Shutdown management
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+// generationRequest represents an internal generation request with channels for response
+type generationRequest struct {
+	request    *types.CommentaryRequest
+	response   chan *types.CommentaryResponse
+	ctx        context.Context
+	startTime  time.Time
+	logEntries []types.LogEntry
+}
+
+// worker represents a generation worker
+type worker struct {
+	id        int
+	generator *CommentaryGenerator
+	logger    zerolog.Logger
+}
+
+// NewCommentaryGenerator creates a new commentary generator
+func NewCommentaryGenerator(
+	llmEngine llmtypes.EngineInterface,
+	promptBuilder *prompt.Builder,
+	config *types.CommentaryConfig,
+	logger zerolog.Logger,
+) (*CommentaryGenerator, error) {
+	if config == nil {
+		config = types.DefaultCommentaryConfig()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	generator := &CommentaryGenerator{
+		llmEngine:     llmEngine,
+		promptBuilder: promptBuilder,
+		config:        config,
+		logger:        logger.With().Str("component", "commentary-generator").Logger(),
+		ctx:           ctx,
+		cancel:        cancel,
+		requestChan:   make(chan *generationRequest, config.ConcurrentRequests*2),
+		workerCount:   config.ConcurrentRequests,
+		metrics: &types.GenerationMetrics{
+			CollectionStart: time.Now(),
+			LastUpdated:     time.Now(),
+		},
+	}
+
+	// Initialize validator
+	validator, err := NewQualityValidator(config, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create validator: %w", err)
+	}
+	generator.validator = validator
+
+	// Initialize fallback generator
+	fallback, err := NewFallbackGenerator(config, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create fallback generator: %w", err)
+	}
+	generator.fallback = fallback
+
+	return generator, nil
+}
+
+// Start starts the commentary generator
+func (g *CommentaryGenerator) Start() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.active {
+		return fmt.Errorf("generator already active")
+	}
+
+	// Create and start workers
+	g.workers = make([]*worker, g.workerCount)
+	for i := 0; i < g.workerCount; i++ {
+		worker := &worker{
+			id:        i,
+			generator: g,
+			logger:    g.logger.With().Int("worker_id", i).Logger(),
+		}
+		g.workers[i] = worker
+
+		g.wg.Add(1)
+		go worker.run()
+	}
+
+	g.active = true
+	g.logger.Info().
+		Int("workers", g.workerCount).
+		Msg("Commentary generator started")
+
+	return nil
+}
+
+// Stop stops the commentary generator
+func (g *CommentaryGenerator) Stop() error {
+	g.mu.Lock()
+	if !g.active {
+		g.mu.Unlock()
+		return nil
+	}
+
+	g.active = false
+	g.cancel()
+	g.mu.Unlock()
+
+	// Close request channel to signal workers to stop
+	close(g.requestChan)
+
+	// Wait for workers to finish
+	g.wg.Wait()
+
+	g.logger.Info().Msg("Commentary generator stopped")
+	return nil
+}
+
+// Generate generates commentary for the given request
+func (g *CommentaryGenerator) Generate(ctx context.Context, request *types.CommentaryRequest) (*types.CommentaryResponse, error) {
+	startTime := time.Now()
+
+	if err := g.validateRequest(request); err != nil {
+		return g.errorResponse(err, startTime), nil
+	}
+
+	// Check if generator is active
+	g.mu.RLock()
+	active := g.active
+	g.mu.RUnlock()
+
+	if !active {
+		return g.errorResponse(fmt.Errorf("generator not active"), startTime), nil
+	}
+
+	// Create internal request
+	genReq := &generationRequest{
+		request:   request,
+		response:  make(chan *types.CommentaryResponse, 1),
+		ctx:       ctx,
+		startTime: startTime,
+		logEntries: []types.LogEntry{
+			{
+				Step:      "request_received",
+				Timestamp: startTime,
+				Success:   true,
+				Message:   "Commentary generation request received",
+			},
+		},
+	}
+
+	// Apply timeout
+	timeout := request.MaxLatency
+	if timeout == 0 {
+		timeout = g.config.MaxLatency
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Submit request to worker pool
+	select {
+	case g.requestChan <- genReq:
+		// Request queued successfully
+		atomic.AddInt64(&g.activeRequests, 1)
+		defer atomic.AddInt64(&g.activeRequests, -1)
+
+	case <-requestCtx.Done():
+		return g.errorResponse(fmt.Errorf("request queue timeout"), startTime), nil
+	}
+
+	// Wait for response
+	select {
+	case response := <-genReq.response:
+		// Update metrics
+		g.updateMetrics(response, startTime)
+		return response, nil
+
+	case <-requestCtx.Done():
+		return g.errorResponse(fmt.Errorf("generation timeout"), startTime), nil
+	}
+}
+
+// worker.run processes generation requests
+func (w *worker) run() {
+	defer w.generator.wg.Done()
+
+	w.logger.Debug().Msg("Worker started")
+
+	for request := range w.generator.requestChan {
+		response := w.processRequest(request)
+
+		select {
+		case request.response <- response:
+			// Response sent successfully
+		case <-request.ctx.Done():
+			// Request context cancelled, skip response
+			w.logger.Debug().Msg("Request context cancelled, skipping response")
+		}
+	}
+
+	w.logger.Debug().Msg("Worker stopped")
+}
+
+// processRequest processes a single generation request
+func (w *worker) processRequest(request *generationRequest) *types.CommentaryResponse {
+	startTime := request.startTime
+
+	// Add processing step
+	request.logEntries = append(request.logEntries, types.LogEntry{
+		Step:      "processing_started",
+		Timestamp: time.Now(),
+		Success:   true,
+		Message:   fmt.Sprintf("Worker %d processing request", w.id),
+	})
+
+	// Step 1: Build prompt
+	promptStartTime := time.Now()
+	promptReq := &prompt.BuildRequest{
+		Transcription: request.request.Input.Text,
+		Confidence:    request.request.Input.Confidence,
+		Timestamp:     request.request.Input.Timestamp,
+		TemplateID:    request.request.Input.Text, // Will be selected automatically
+		ExtraContext:  request.request.Input.ExtraData,
+	}
+
+	if request.request.Input.AudioMetrics != nil {
+		promptReq.AudioMetrics = &templates.AudioMetrics{
+			Volume:       1.0 - request.request.Input.AudioMetrics.BackgroundNoise, // Convert background noise to volume
+			Clarity:      request.request.Input.AudioMetrics.Clarity,
+			NoiseLevel:   request.request.Input.AudioMetrics.BackgroundNoise,
+			VoicePresent: request.request.Input.AudioMetrics.VoiceDetection,
+		}
+	}
+
+	if request.request.Input.AudioMetrics != nil {
+		promptReq.AudioMetrics = &templates.AudioMetrics{
+			Volume:       1.0 - request.request.Input.AudioMetrics.BackgroundNoise, // Convert background noise to volume
+			Clarity:      request.request.Input.AudioMetrics.Clarity,
+			NoiseLevel:   request.request.Input.AudioMetrics.BackgroundNoise,
+			VoicePresent: request.request.Input.AudioMetrics.VoiceDetection,
+		}
+	}
+
+	promptResult, err := w.generator.promptBuilder.Build(promptReq)
+	if err != nil {
+		request.logEntries = append(request.logEntries, types.LogEntry{
+			Step:      "prompt_build_failed",
+			Timestamp: time.Now(),
+			Duration:  time.Since(promptStartTime),
+			Success:   false,
+			Message:   err.Error(),
+		})
+
+		// Try fallback
+		return w.generateFallback(request, fmt.Errorf("prompt build failed: %w", err))
+	}
+
+	request.logEntries = append(request.logEntries, types.LogEntry{
+		Step:      "prompt_built",
+		Timestamp: time.Now(),
+		Duration:  time.Since(promptStartTime),
+		Success:   true,
+		Message:   fmt.Sprintf("Prompt built using template %s", promptResult.TemplateID),
+		Data:      map[string]interface{}{"template_id": promptResult.TemplateID, "prompt_length": promptResult.PromptLength},
+	})
+
+	// Step 2: Generate with LLM
+	if w.generator.llmEngine == nil {
+		// No LLM engine available, go directly to fallback
+		return w.generateFallback(request, fmt.Errorf("no LLM engine available"))
+	}
+
+	llmStartTime := time.Now()
+	llmReq := llmtypes.GenerationRequest{
+		Prompt:      promptResult.Prompt,
+		MaxTokens:   150, // Default for commentary
+		Temperature: 0.7,
+		TopP:        0.9,
+		TopK:        40,
+		Timeout:     15 * time.Second, // Increased from 2s to allow for LLM generation
+	}
+
+	llmResp, err := w.generator.llmEngine.Generate(llmReq)
+	if err != nil {
+		request.logEntries = append(request.logEntries, types.LogEntry{
+			Step:      "llm_generation_failed",
+			Timestamp: time.Now(),
+			Duration:  time.Since(llmStartTime),
+			Success:   false,
+			Message:   err.Error(),
+		})
+
+		// Try fallback
+		return w.generateFallback(request, fmt.Errorf("LLM generation failed: %w", err))
+	}
+
+	request.logEntries = append(request.logEntries, types.LogEntry{
+		Step:      "llm_generated",
+		Timestamp: time.Now(),
+		Duration:  time.Since(llmStartTime),
+		Success:   true,
+		Message:   fmt.Sprintf("Generated %d tokens", llmResp.TokenCount),
+		Data:      map[string]interface{}{"token_count": llmResp.TokenCount, "tokens_per_second": llmResp.Metadata.TokensPerSecond},
+	})
+
+	// Step 3: Validate quality
+	validationStartTime := time.Now()
+	validation := w.generator.validator.Validate(llmResp.Text, request.request.Input)
+
+	request.logEntries = append(request.logEntries, types.LogEntry{
+		Step:      "quality_validated",
+		Timestamp: time.Now(),
+		Duration:  time.Since(validationStartTime),
+		Success:   validation.IsValid,
+		Message:   fmt.Sprintf("Quality validation: %v (score: %.2f)", validation.IsValid, validation.Confidence),
+		Data:      map[string]interface{}{"quality_score": validation.Confidence, "issues": validation.Issues},
+	})
+
+	if !validation.IsValid && w.generator.config.EnableFallback {
+		// Try fallback
+		return w.generateFallback(request, fmt.Errorf("quality validation failed: %v", validation.Issues))
+	}
+
+	// Step 4: Create commentary result
+	commentary := &types.Commentary{
+		ID:          generateCommentaryID(),
+		Text:        llmResp.Text,
+		DisplayText: w.generator.formatForDisplay(llmResp.Text),
+		Source:      "llm",
+		Confidence:  validation.Confidence,
+		Timestamp:   time.Now(),
+
+		InputText:       request.request.Input.Text,
+		InputConfidence: request.request.Input.Confidence,
+		TemplateID:      promptResult.TemplateID,
+		PromptUsed:      promptResult.Prompt,
+
+		GenerationLatency: llmResp.Latency,
+		CacheHit:          false,
+
+		QualityScore:     validation.Confidence,
+		RelevanceScore:   validation.Relevance,
+		ValidationPassed: validation.IsValid,
+
+		Metadata: types.CommentaryMetadata{
+			Category:        promptResult.Metadata["template_category"].(string),
+			Priority:        promptResult.Metadata["template_priority"].(string),
+			ProcessingSteps: extractSteps(request.logEntries),
+			ExtraData:       make(map[string]string),
+		},
+	}
+
+	// Add match context if available
+	if request.request.Input.Context != nil {
+		commentary.Metadata.MatchContext = request.request.Input.Context
+	}
+
+	// Add audio quality if available
+	if request.request.Input.AudioMetrics != nil {
+		commentary.Metadata.AudioQuality = request.request.Input.AudioMetrics
+	}
+
+	totalLatency := time.Since(startTime)
+
+	return &types.CommentaryResponse{
+		Commentary:    commentary,
+		Success:       true,
+		Latency:       totalLatency,
+		Timestamp:     time.Now(),
+		ProcessingLog: request.logEntries,
+	}
+}
+
+// generateFallback generates fallback commentary when primary generation fails
+func (w *worker) generateFallback(request *generationRequest, originalErr error) *types.CommentaryResponse {
+	if !w.generator.config.EnableFallback {
+		return w.generator.errorResponse(originalErr, request.startTime)
+	}
+
+	w.logger.Warn().
+		Err(originalErr).
+		Str("input", request.request.Input.Text).
+		Msg("Primary generation failed, using fallback")
+
+	fallbackStartTime := time.Now()
+	fallbackCommentary, err := w.generator.fallback.Generate(request.request.Input)
+
+	request.logEntries = append(request.logEntries, types.LogEntry{
+		Step:      "fallback_generated",
+		Timestamp: time.Now(),
+		Duration:  time.Since(fallbackStartTime),
+		Success:   err == nil,
+		Message:   "Fallback generation attempted",
+		Data:      map[string]interface{}{"original_error": originalErr.Error()},
+	})
+
+	if err != nil {
+		return w.generator.errorResponse(fmt.Errorf("fallback failed: %w", err), request.startTime)
+	}
+
+	// Mark as fallback source
+	fallbackCommentary.Source = "fallback"
+	fallbackCommentary.Metadata.Fallbacks = []string{originalErr.Error()}
+
+	totalLatency := time.Since(request.startTime)
+
+	return &types.CommentaryResponse{
+		Commentary:    fallbackCommentary,
+		Success:       true,
+		Latency:       totalLatency,
+		Timestamp:     time.Now(),
+		ProcessingLog: request.logEntries,
+	}
+}
+
+// Helper functions
+
+func (g *CommentaryGenerator) validateRequest(request *types.CommentaryRequest) error {
+	if request == nil {
+		return fmt.Errorf("request cannot be nil")
+	}
+	if request.Input.Text == "" {
+		return fmt.Errorf("input text cannot be empty")
+	}
+	if request.Input.Confidence < 0 || request.Input.Confidence > 1 {
+		return fmt.Errorf("confidence must be between 0 and 1")
+	}
+	return nil
+}
+
+func (g *CommentaryGenerator) errorResponse(err error, startTime time.Time) *types.CommentaryResponse {
+	return &types.CommentaryResponse{
+		Success:   false,
+		Error:     err.Error(),
+		Latency:   time.Since(startTime),
+		Timestamp: time.Now(),
+	}
+}
+
+func (g *CommentaryGenerator) updateMetrics(response *types.CommentaryResponse, startTime time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.metrics.TotalRequests++
+
+	if response.Success {
+		g.metrics.SuccessfulReqs++
+
+		if response.Commentary != nil {
+			switch response.Commentary.Source {
+			case "llm":
+				g.metrics.LLMGenerated++
+			case "cache":
+				g.metrics.CacheHits++
+			case "fallback":
+				g.metrics.FallbackUsed++
+			}
+
+			// Update quality metrics
+			g.metrics.AvgQualityScore = updateAverage(g.metrics.AvgQualityScore, response.Commentary.QualityScore, g.metrics.SuccessfulReqs)
+			g.metrics.AvgRelevanceScore = updateAverage(g.metrics.AvgRelevanceScore, response.Commentary.RelevanceScore, g.metrics.SuccessfulReqs)
+
+			if !response.Commentary.ValidationPassed {
+				g.metrics.ValidationFailures++
+			}
+		}
+	} else {
+		g.metrics.FailedReqs++
+	}
+
+	// Update latency metrics
+	latency := response.Latency
+	g.metrics.AvgLatency = updateAverageDuration(g.metrics.AvgLatency, latency, g.metrics.TotalRequests)
+
+	if latency > g.metrics.MaxLatency {
+		g.metrics.MaxLatency = latency
+	}
+
+	g.metrics.ActiveRequests = int(atomic.LoadInt64(&g.activeRequests))
+	g.metrics.LastUpdated = time.Now()
+}
+
+func (g *CommentaryGenerator) formatForDisplay(text string) string {
+	// Basic formatting for OBS overlay
+	// In a real implementation, this would include proper text formatting,
+	// line breaks, length limits, etc.
+	if len(text) > 120 {
+		text = text[:117] + "..."
+	}
+	return text
+}
+
+// GetMetrics returns current metrics
+func (g *CommentaryGenerator) GetMetrics() *types.GenerationMetrics {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	// Create a copy to avoid race conditions
+	metrics := *g.metrics
+	return &metrics
+}
+
+// GetStatus returns the current status of the generator
+func (g *CommentaryGenerator) GetStatus() map[string]interface{} {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	status := map[string]interface{}{
+		"active":          g.active,
+		"worker_count":    g.workerCount,
+		"active_requests": atomic.LoadInt64(&g.activeRequests),
+		"queue_size":      len(g.requestChan),
+		"llm_ready":       g.llmEngine.IsReady(),
+	}
+
+	if g.llmEngine != nil {
+		status["llm_status"] = g.llmEngine.GetStatus()
+	}
+
+	return status
+}
+
+// Utility functions
+
+func generateRequestID() string {
+	return fmt.Sprintf("req_%d", time.Now().UnixNano())
+}
+
+func generateCommentaryID() string {
+	return fmt.Sprintf("comm_%d", time.Now().UnixNano())
+}
+
+func extractSteps(logEntries []types.LogEntry) []string {
+	steps := make([]string, len(logEntries))
+	for i, entry := range logEntries {
+		steps[i] = entry.Step
+	}
+	return steps
+}
+
+func updateAverage(current float32, newValue float32, count uint64) float32 {
+	if count <= 1 {
+		return newValue
+	}
+	return (current*float32(count-1) + newValue) / float32(count)
+}
+
+func updateAverageDuration(current time.Duration, newValue time.Duration, count uint64) time.Duration {
+	if count <= 1 {
+		return newValue
+	}
+	return time.Duration((int64(current)*int64(count-1) + int64(newValue)) / int64(count))
+}
+</file>
+
+<file path="engine/validator.go">
+package engine
+
+import (
+	"regexp"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/rs/zerolog"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/types"
+)
+
+// QualityValidator validates the quality of generated commentary
+type QualityValidator struct {
+	config          *types.CommentaryConfig
+	logger          zerolog.Logger
+	profanityFilter *ProfanityFilter
+	relevanceScorer *RelevanceScorer
+
+	// Validation rules
+	minLength          int
+	maxLength          int
+	minConfidence      float32
+	qualityThreshold   float32
+	relevanceThreshold float32
+
+	// Pattern matchers
+	validPatterns   []*regexp.Regexp
+	invalidPatterns []*regexp.Regexp
+}
+
+// ValidationResult represents the result of quality validation
+type ValidationResult struct {
+	IsValid     bool               `json:"is_valid"`
+	Confidence  float32            `json:"confidence"`
+	Relevance   float32            `json:"relevance"`
+	Issues      []string           `json:"issues"`
+	Suggestions []string           `json:"suggestions"`
+	Scores      map[string]float32 `json:"scores"`
+}
+
+// NewQualityValidator creates a new quality validator
+func NewQualityValidator(config *types.CommentaryConfig, logger zerolog.Logger) (*QualityValidator, error) {
+	validator := &QualityValidator{
+		config:             config,
+		logger:             logger.With().Str("component", "quality-validator").Logger(),
+		minLength:          config.MinOutputLength,
+		maxLength:          config.MaxOutputLength,
+		minConfidence:      config.MinConfidence,
+		qualityThreshold:   config.QualityThreshold,
+		relevanceThreshold: config.RelevanceThreshold,
+	}
+
+	// Initialize profanity filter if enabled
+	if config.EnableProfanityFilter {
+		validator.profanityFilter = NewProfanityFilter()
+	}
+
+	// Initialize relevance scorer
+	validator.relevanceScorer = NewRelevanceScorer()
+
+	// Initialize validation patterns
+	validator.initializePatterns()
+
+	return validator, nil
+}
+
+// Validate validates the quality of generated commentary
+func (v *QualityValidator) Validate(text string, input types.TranscriptionInput) *ValidationResult {
+	result := &ValidationResult{
+		IsValid:     true,
+		Confidence:  1.0,
+		Relevance:   1.0,
+		Issues:      []string{},
+		Suggestions: []string{},
+		Scores:      make(map[string]float32),
+	}
+
+	// Basic length validation
+	if !v.validateLength(text, result) {
+		result.IsValid = false
+	}
+
+	// Content quality validation
+	if !v.validateContent(text, result) {
+		result.IsValid = false
+	}
+
+	// Profanity check
+	if v.profanityFilter != nil && !v.validateProfanity(text, result) {
+		result.IsValid = false
+	}
+
+	// Relevance check
+	if !v.validateRelevance(text, input, result) {
+		result.IsValid = false
+	}
+
+	// Calculate overall confidence
+	v.calculateConfidence(result)
+
+	// Final validation based on thresholds
+	if result.Confidence < v.qualityThreshold || result.Relevance < v.relevanceThreshold {
+		result.IsValid = false
+		if result.Confidence < v.qualityThreshold {
+			result.Issues = append(result.Issues, "Overall quality below threshold")
+		}
+		if result.Relevance < v.relevanceThreshold {
+			result.Issues = append(result.Issues, "Relevance below threshold")
+		}
+	}
+
+	return result
+}
+
+// validateLength checks if the text length is within acceptable bounds
+func (v *QualityValidator) validateLength(text string, result *ValidationResult) bool {
+	length := utf8.RuneCountInString(text)
+	result.Scores["length"] = float32(length)
+
+	if length < v.minLength {
+		result.Issues = append(result.Issues, "Text too short")
+		result.Suggestions = append(result.Suggestions, "Add more descriptive content")
+		return false
+	}
+
+	if length > v.maxLength {
+		result.Issues = append(result.Issues, "Text too long")
+		result.Suggestions = append(result.Suggestions, "Reduce text length")
+		return false
+	}
+
+	return true
+}
+
+// validateContent checks the content quality using various heuristics
+func (v *QualityValidator) validateContent(text string, result *ValidationResult) bool {
+	valid := true
+	contentScore := float32(1.0)
+
+	// Check for empty or whitespace-only text
+	if strings.TrimSpace(text) == "" {
+		result.Issues = append(result.Issues, "Empty or whitespace-only text")
+		return false
+	}
+
+	// Check for repetitive content
+	if v.isRepetitive(text) {
+		result.Issues = append(result.Issues, "Repetitive content detected")
+		result.Suggestions = append(result.Suggestions, "Vary the language and structure")
+		contentScore -= 0.3
+		valid = false
+	}
+
+	// Check for incomplete sentences
+	if v.hasIncompleteSentences(text) {
+		result.Issues = append(result.Issues, "Incomplete sentences detected")
+		result.Suggestions = append(result.Suggestions, "Complete all sentences properly")
+		contentScore -= 0.2
+	}
+
+	// Check for valid patterns
+	validPatternScore := v.validatePatterns(text)
+	contentScore *= validPatternScore
+	result.Scores["patterns"] = validPatternScore
+
+	// Check for coherence
+	coherenceScore := v.assessCoherence(text)
+	contentScore *= coherenceScore
+	result.Scores["coherence"] = coherenceScore
+
+	if coherenceScore < 0.5 {
+		result.Issues = append(result.Issues, "Low coherence detected")
+		result.Suggestions = append(result.Suggestions, "Improve logical flow and clarity")
+		valid = false
+	}
+
+	result.Scores["content"] = contentScore
+	return valid && contentScore >= 0.6
+}
+
+// validateProfanity checks for inappropriate content
+func (v *QualityValidator) validateProfanity(text string, result *ValidationResult) bool {
+	if v.profanityFilter.ContainsProfanity(text) {
+		result.Issues = append(result.Issues, "Inappropriate content detected")
+		result.Suggestions = append(result.Suggestions, "Remove inappropriate language")
+		result.Scores["profanity"] = 0.0
+		return false
+	}
+
+	result.Scores["profanity"] = 1.0
+	return true
+}
+
+// validateRelevance checks if the content is relevant to the input
+func (v *QualityValidator) validateRelevance(text string, input types.TranscriptionInput, result *ValidationResult) bool {
+	relevanceScore := v.relevanceScorer.Score(text, input.Text)
+	result.Relevance = relevanceScore
+	result.Scores["relevance"] = relevanceScore
+
+	if relevanceScore < v.relevanceThreshold {
+		result.Issues = append(result.Issues, "Low relevance to input")
+		result.Suggestions = append(result.Suggestions, "Focus more on the specific judge call")
+		return false
+	}
+
+	return true
+}
+
+// calculateConfidence calculates the overall confidence score
+func (v *QualityValidator) calculateConfidence(result *ValidationResult) {
+	weights := map[string]float32{
+		"content":   0.4,
+		"relevance": 0.3,
+		"coherence": 0.2,
+		"patterns":  0.1,
+	}
+
+	totalScore := float32(0.0)
+	totalWeight := float32(0.0)
+
+	for metric, weight := range weights {
+		if score, exists := result.Scores[metric]; exists {
+			totalScore += score * weight
+			totalWeight += weight
+		}
+	}
+
+	if totalWeight > 0 {
+		result.Confidence = totalScore / totalWeight
+	}
+
+	// Apply penalties for issues
+	penalty := float32(len(result.Issues)) * 0.1
+	result.Confidence = max(0.0, result.Confidence-penalty)
+}
+
+// Helper methods
+
+func (v *QualityValidator) isRepetitive(text string) bool {
+	words := strings.Fields(strings.ToLower(text))
+	if len(words) < 6 {
+		return false
+	}
+
+	wordCount := make(map[string]int)
+	for _, word := range words {
+		wordCount[word]++
+	}
+
+	// Check if any word appears more than 30% of the time
+	threshold := len(words) * 3 / 10
+	for _, count := range wordCount {
+		if count > threshold {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (v *QualityValidator) hasIncompleteSentences(text string) bool {
+	// Simple check for sentences that don't end with proper punctuation
+	sentences := regexp.MustCompile(`[.!?]+`).Split(text, -1)
+
+	for _, sentence := range sentences {
+		sentence = strings.TrimSpace(sentence)
+		if len(sentence) > 20 && !regexp.MustCompile(`[.!?]$`).MatchString(text) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (v *QualityValidator) validatePatterns(text string) float32 {
+	score := float32(1.0)
+
+	// Check valid patterns (add score)
+	for _, pattern := range v.validPatterns {
+		if pattern.MatchString(text) {
+			score += 0.1
+		}
+	}
+
+	// Check invalid patterns (subtract score)
+	for _, pattern := range v.invalidPatterns {
+		if pattern.MatchString(text) {
+			score -= 0.2
+		}
+	}
+
+	return max(0.0, min(1.0, score))
+}
+
+func (v *QualityValidator) assessCoherence(text string) float32 {
+	// Simple coherence assessment based on sentence structure
+	sentences := regexp.MustCompile(`[.!?]+`).Split(text, -1)
+
+	if len(sentences) == 0 {
+		return 0.0
+	}
+
+	coherenceScore := float32(1.0)
+
+	for _, sentence := range sentences {
+		sentence = strings.TrimSpace(sentence)
+		if len(sentence) == 0 {
+			continue
+		}
+
+		// Check for basic sentence structure
+		if len(strings.Fields(sentence)) < 3 {
+			coherenceScore -= 0.2
+		}
+
+		// Check for connecting words (basic coherence)
+		hasConnectors := regexp.MustCompile(`\b(and|but|however|therefore|thus|meanwhile|after|before|while|since)\b`).MatchString(strings.ToLower(sentence))
+		if !hasConnectors && len(sentences) > 1 {
+			coherenceScore -= 0.1
+		}
+	}
+
+	return max(0.0, coherenceScore)
+}
+
+func (v *QualityValidator) initializePatterns() {
+	// Patterns that indicate good HEMA commentary
+	validPatternStrings := []string{
+		`\b(point|score|hit|touch)\b`,
+		`\b(left|right|red|blue)\b`,
+		`\b(excellent|good|clean|solid)\b`,
+		`\b(attack|defense|parry|riposte)\b`,
+		`\b(fencer|director|judge)\b`,
+	}
+
+	// Patterns that indicate poor commentary
+	invalidPatternStrings := []string{
+		`\b(um|uh|er)\b`,
+		`\.\.\.$`,                       // Trailing ellipsis
+		`\b(I think|maybe|probably)\b`,  // Uncertain language
+		`\b(very very|really really)\b`, // Repetitive intensifiers
+	}
+
+	// Compile valid patterns
+	for _, pattern := range validPatternStrings {
+		if compiled, err := regexp.Compile(pattern); err == nil {
+			v.validPatterns = append(v.validPatterns, compiled)
+		}
+	}
+
+	// Compile invalid patterns
+	for _, pattern := range invalidPatternStrings {
+		if compiled, err := regexp.Compile(pattern); err == nil {
+			v.invalidPatterns = append(v.invalidPatterns, compiled)
+		}
+	}
+}
+
+// ProfanityFilter provides basic profanity filtering
+type ProfanityFilter struct {
+	blacklist []string
+	patterns  []*regexp.Regexp
+}
+
+// NewProfanityFilter creates a new profanity filter
+func NewProfanityFilter() *ProfanityFilter {
+	// Basic profanity list - in a real implementation, this would be more comprehensive
+	blacklist := []string{
+		"damn", "hell", "crap", // Add actual words as needed
+	}
+
+	filter := &ProfanityFilter{
+		blacklist: blacklist,
+	}
+
+	// Compile patterns
+	for _, word := range blacklist {
+		if pattern, err := regexp.Compile(`\b` + regexp.QuoteMeta(word) + `\b`); err == nil {
+			filter.patterns = append(filter.patterns, pattern)
+		}
+	}
+
+	return filter
+}
+
+// ContainsProfanity checks if text contains inappropriate content
+func (pf *ProfanityFilter) ContainsProfanity(text string) bool {
+	lowerText := strings.ToLower(text)
+
+	for _, pattern := range pf.patterns {
+		if pattern.MatchString(lowerText) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// RelevanceScorer scores the relevance between generated commentary and input
+type RelevanceScorer struct {
+	hemaKeywords []string
+}
+
+// NewRelevanceScorer creates a new relevance scorer
+func NewRelevanceScorer() *RelevanceScorer {
+	return &RelevanceScorer{
+		hemaKeywords: []string{
+			"point", "hit", "touch", "score", "double", "afterblow",
+			"red", "blue", "attack", "defense",
+			"parry", "riposte", "thrust", "cut", "pommel", "bind",
+			"director", "judge", "halt", "warning", "card", "match",
+			"shallow", "deep", "target", "ring", "pushed", "area", "tempo",
+		},
+	}
+}
+
+// Score calculates relevance between commentary and input transcription
+func (rs *RelevanceScorer) Score(commentary, transcription string) float32 {
+	commentaryWords := strings.Fields(strings.ToLower(commentary))
+	transcriptionWords := strings.Fields(strings.ToLower(transcription))
+
+	if len(commentaryWords) == 0 || len(transcriptionWords) == 0 {
+		return 0.0
+	}
+
+	// Calculate HEMA-specific terms
+	hemaTerms := 0
+	for _, word := range commentaryWords {
+		for _, keyword := range rs.hemaKeywords {
+			if strings.Contains(word, keyword) || strings.Contains(keyword, word) {
+				hemaTerms++
+				break
+			}
+		}
+	}
+
+	// Calculate relevance score
+	hemaRelevanceScore := float32(hemaTerms) / float32(len(commentaryWords))
+
+	// Calculate semantic similarity using Jaccard similarity
+	semanticScore := rs.jaccardSimilarity(commentaryWords, transcriptionWords)
+
+	// Weighted combination: 50% HEMA relevance + 50% semantic similarity
+	relevance := (hemaRelevanceScore * 0.5) + (semanticScore * 0.5)
+
+	return min(1.0, relevance)
+}
+
+// jaccardSimilarity calculates Jaccard similarity between two sets of words
+func (rs *RelevanceScorer) jaccardSimilarity(words1, words2 []string) float32 {
+	// Create sets
+	set1 := make(map[string]bool)
+	set2 := make(map[string]bool)
+
+	for _, word := range words1 {
+		set1[word] = true
+	}
+	for _, word := range words2 {
+		set2[word] = true
+	}
+
+	// Calculate intersection
+	intersection := 0
+	for word := range set1 {
+		if set2[word] {
+			intersection++
+		}
+	}
+
+	// Calculate union
+	union := len(set1) + len(set2) - intersection
+
+	if union == 0 {
+		return 0.0
+	}
+
+	return float32(intersection) / float32(union)
+}
+
+// Utility functions
+func min(a, b float32) float32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+</file>
+
+<file path="integration/end_to_end_test.go">
+package integration
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	llmtypes "github.com/your-org/hema-replay-system/pkg/llm/types"
+
+	commentarycontext "github.com/your-org/hema-replay-system/pkg/commentary/context"
+	"github.com/your-org/hema-replay-system/pkg/commentary/engine"
+	"github.com/your-org/hema-replay-system/pkg/commentary/prompt"
+	"github.com/your-org/hema-replay-system/pkg/commentary/templates"
+	"github.com/your-org/hema-replay-system/pkg/commentary/types"
+	llmengine "github.com/your-org/hema-replay-system/pkg/llm/engine"
+)
+
+func TestCommentaryFallbackBehavior(t *testing.T) {
+	// Create logger
+	logger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.InfoLevel)
+
+	commentaryConfig := types.DefaultCommentaryConfig()
+	commentaryConfig.EnableFallback = true
+	commentaryConfig.MaxRetries = 1
+	commentaryConfig.EnableCache = false // Disable cache for testing
+
+	// Create required dependencies - use default template manager with registered templates
+	contextManager := commentarycontext.NewContextManager(logger)
+	promptConfig := prompt.DefaultBuilderConfig()
+	promptBuilder := prompt.NewBuilder(templates.DefaultTemplateManager, contextManager, promptConfig, logger)
+
+	// Create commentary generator (with nil LLM engine to force fallback)
+	generator, err := engine.NewCommentaryGenerator(nil, promptBuilder, commentaryConfig, logger)
+	require.NoError(t, err)
+	defer generator.Stop()
+
+	// Start generator
+	err = generator.Start()
+	require.NoError(t, err, "Generator should start even without LLM engine")
+
+	// Try to generate commentary - should fall back to template
+	input := types.TranscriptionInput{
+		Text:       "Point scored to red",
+		Confidence: 0.8,
+		Timestamp:  time.Now(),
+	}
+
+	request := types.CommentaryRequest{
+		Input:       input,
+		MaxLatency:  3 * time.Second,
+		Quality:     types.QualityLevelFast, // Fast mode should prefer fallback
+		CachePolicy: types.CachePolicyDisabled,
+	}
+
+	response, err := generator.Generate(context.Background(), &request)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.True(t, response.Success)
+	require.NotNil(t, response.Commentary)
+
+	// Should use fallback
+	assert.Equal(t, "fallback", response.Commentary.Source)
+	assert.NotEmpty(t, response.Commentary.Text)
+	assert.True(t, response.Commentary.Confidence > 0)
+
+	t.Logf("Fallback commentary: %s", response.Commentary.Text)
+}
+
+func TestCommentaryGeneratorLifecycle(t *testing.T) {
+	// Create logger
+	logger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.InfoLevel)
+
+	commentaryConfig := types.DefaultCommentaryConfig()
+	commentaryConfig.EnableFallback = true
+	commentaryConfig.MaxLatency = 5 * time.Second
+	commentaryConfig.EnableCache = false // Disable cache for testing
+
+	// Create required dependencies
+	contextManager := commentarycontext.NewContextManager(logger)
+	promptConfig := prompt.DefaultBuilderConfig()
+	promptBuilder := prompt.NewBuilder(templates.DefaultTemplateManager, contextManager, promptConfig, logger)
+
+	// Create commentary generator
+	generator, err := engine.NewCommentaryGenerator(nil, promptBuilder, commentaryConfig, logger)
+	require.NoError(t, err)
+
+	// Test start/stop cycle
+	err = generator.Start()
+	require.NoError(t, err)
+
+	// Get metrics to verify it's running
+	metrics := generator.GetMetrics()
+	assert.NotNil(t, metrics)
+
+	// Test graceful shutdown
+	err = generator.Stop()
+	assert.NoError(t, err, "Generator should stop gracefully")
+}
+
+func TestCommentaryTemplateSelection(t *testing.T) {
+	// Create logger
+	logger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.InfoLevel)
+
+	commentaryConfig := types.DefaultCommentaryConfig()
+	commentaryConfig.EnableFallback = true
+
+	// Create required dependencies
+	contextManager := commentarycontext.NewContextManager(logger)
+	promptConfig := prompt.DefaultBuilderConfig()
+	promptBuilder := prompt.NewBuilder(templates.DefaultTemplateManager, contextManager, promptConfig, logger)
+
+	// Create commentary generator
+	generator, err := engine.NewCommentaryGenerator(nil, promptBuilder, commentaryConfig, logger)
+	require.NoError(t, err)
+	defer generator.Stop()
+
+	err = generator.Start()
+	require.NoError(t, err)
+
+	// Test different types of HEMA calls to see template selection
+	testCases := []struct {
+		name string
+		text string
+	}{
+		{"Point Scored", "Point scored to red fencer"},
+		{"Technical Action", "Beautiful riposte from blue"},
+		{"Rules Clarification", "No point awarded, simultaneous attack"},
+		{"Generic Action", "Good exchange between both fencers"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := types.TranscriptionInput{
+				Text:       tc.text,
+				Confidence: 0.8,
+				Timestamp:  time.Now(),
+			}
+
+			request := types.CommentaryRequest{
+				Input:       input,
+				MaxLatency:  2 * time.Second,
+				Quality:     types.QualityLevelBalanced,
+				CachePolicy: types.CachePolicyDisabled,
+			}
+
+			response, err := generator.Generate(context.Background(), &request)
+			require.NoError(t, err)
+			require.NotNil(t, response)
+			require.True(t, response.Success)
+
+			commentary := response.Commentary
+			assert.NotEmpty(t, commentary.Text)
+			assert.Equal(t, "fallback", commentary.Source) // Should use fallback since no LLM
+
+			t.Logf("%s -> %s", tc.text, commentary.Text)
+		})
+	}
+}
+
+func TestCommentaryWithActualLLM(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping LLM test in short mode")
+	}
+
+	// Create logger
+	logger := zerolog.New(zerolog.NewConsoleWriter()).Level(zerolog.InfoLevel)
+
+	// Commentary configuration
+	commentaryConfig := types.DefaultCommentaryConfig()
+	commentaryConfig.EnableFallback = true
+	commentaryConfig.MaxLatency = 15 * time.Second // Generous timeout for LLM
+	commentaryConfig.EnableCache = false           // Disable cache for testing
+	config := llmtypes.DefaultLLMConfig()
+	// Create LLM engine
+	llmEngine, err := llmengine.NewLlmEngine(config, context.Background(), logger)
+	require.NoError(t, err, "Failed to create LLM engine")
+	defer llmEngine.Close()
+
+	// Create required dependencies
+	contextManager := commentarycontext.NewContextManager(logger)
+	promptConfig := prompt.DefaultBuilderConfig()
+	promptBuilder := prompt.NewBuilder(templates.DefaultTemplateManager, contextManager, promptConfig, logger)
+
+	// Create commentary generator with actual LLM engine
+	generator, err := engine.NewCommentaryGenerator(llmEngine, promptBuilder, commentaryConfig, logger)
+	require.NoError(t, err, "Failed to create commentary generator")
+	defer generator.Stop()
+
+	// Start generator
+	err = generator.Start()
+	require.NoError(t, err, "Failed to start commentary generator")
+
+	// Test cases with different HEMA scenarios
+	testCases := []struct {
+		name           string
+		transcription  string
+		confidence     float32
+		expectedSource string
+		expectedMinLen int
+	}{
+		{
+			name:           "Point Scored",
+			transcription:  "Red deep target blue",
+			confidence:     0.9,
+			expectedSource: "llm", // Should use LLM with high confidence
+			expectedMinLen: 20,
+		},
+		{
+			name:           "Technical Action",
+			transcription:  "Beautiful thrust and riposte from blue",
+			confidence:     0.8,
+			expectedSource: "llm",
+			expectedMinLen: 15,
+		},
+		{
+			name:           "Double Hit",
+			transcription:  "Double hit, both fencers hit simultaneously",
+			confidence:     0.85,
+			expectedSource: "llm",
+			expectedMinLen: 25,
+		},
+		{
+			name:           "Point scored",
+			transcription:  "Deep target blue",
+			confidence:     0.85,
+			expectedSource: "llm",
+			expectedMinLen: 15,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Allow generous timeout for this subtest
+
+			input := types.TranscriptionInput{
+				Text:       tc.transcription,
+				Confidence: tc.confidence,
+				Timestamp:  time.Now(),
+			}
+
+			request := types.CommentaryRequest{
+				Input:       input,
+				MaxLatency:  15 * time.Second,
+				Quality:     types.QualityLevelBalanced,
+				CachePolicy: types.CachePolicyDisabled,
+			}
+
+			t.Logf("Generating commentary for: %s", tc.transcription)
+			startTime := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			response, err := generator.Generate(ctx, &request)
+
+			duration := time.Since(startTime)
+			t.Logf("Generation took: %v", duration)
+
+			require.NoError(t, err, "Commentary generation should not fail")
+			require.NotNil(t, response, "Response should not be nil")
+			require.True(t, response.Success, "Response should be successful: %s", response.Error)
+			require.NotNil(t, response.Commentary, "Commentary should not be nil")
+
+			commentary := response.Commentary
+
+			// Validate basic properties
+			assert.NotEmpty(t, commentary.Text, "Commentary text should not be empty")
+			assert.NotEmpty(t, commentary.DisplayText, "Display text should not be empty")
+			assert.True(t, commentary.Confidence > 0, "Confidence should be positive")
+			assert.WithinDuration(t, time.Now(), commentary.Timestamp, 5*time.Second, "Timestamp should be recent")
+
+			// Validate length
+			assert.True(t, len(commentary.Text) >= tc.expectedMinLen,
+				"Commentary too short: got %d chars, expected >= %d", len(commentary.Text), tc.expectedMinLen)
+			assert.True(t, len(commentary.Text) <= commentaryConfig.MaxOutputLength,
+				"Commentary too long: got %d chars, expected <= %d", len(commentary.Text), commentaryConfig.MaxOutputLength)
+
+			// Validate generation performance
+			assert.True(t, commentary.GenerationLatency > 0, "Generation latency should be positive")
+			assert.True(t, commentary.GenerationLatency < 20*time.Second, "Generation should complete in reasonable time")
+
+			// Log results for manual inspection
+			t.Logf("Input: %s", tc.transcription)
+			t.Logf("Generated Commentary: %s", commentary.Text)
+			t.Logf("Source: %s", commentary.Source)
+			t.Logf("Confidence: %.2f", commentary.Confidence)
+			t.Logf("Generation Latency: %v", commentary.GenerationLatency)
+			t.Logf("Quality Score: %.2f", commentary.QualityScore)
+
+			// Verify it's not empty/generic fallback text
+			assert.NotEqual(t, "The action continues.", commentary.Text, "Should not use generic fallback")
+			assert.True(t, len(commentary.Text) > 10, "Commentary should be substantive")
+		})
+	}
+}
+</file>
+
+<file path="integration/manager.go">
+package integration
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/engine"
+	"github.com/your-org/hema-replay-system/pkg/commentary/types"
+	speechtypes "github.com/your-org/hema-replay-system/pkg/speech/types"
+)
+
+// IntegrationManager manages the integration between speech recognition and commentary generation
+type IntegrationManager struct {
+	// Dependencies
+	commentaryGenerator *engine.CommentaryGenerator
+
+	// Configuration
+	config *IntegrationConfig
+	logger zerolog.Logger
+
+	// Communication channels
+	speechInput      <-chan *speechtypes.TranscriptionResult
+	commentaryOutput chan<- *types.Commentary
+	errorOutput      chan<- error
+
+	// State management
+	mu      sync.RWMutex
+	active  bool
+	metrics *IntegrationMetrics
+
+	// Match context tracking
+	matchState  *types.MatchContext
+	callHistory []TranscriptionEvent
+	maxHistory  int
+
+	// Processing control
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+// IntegrationConfig configures the integration behavior
+type IntegrationConfig struct {
+	// Processing settings
+	EnableContextEnrichment bool          `mapstructure:"enable_context_enrichment"`
+	MaxConcurrentRequests   int           `mapstructure:"max_concurrent_requests"`
+	ProcessingTimeout       time.Duration `mapstructure:"processing_timeout"`
+
+	// Filtering settings
+	MinConfidenceThreshold float32       `mapstructure:"min_confidence_threshold"`
+	EnableDuplicateFilter  bool          `mapstructure:"enable_duplicate_filter"`
+	DuplicateTimeWindow    time.Duration `mapstructure:"duplicate_time_window"`
+
+	// Commentary settings
+	DefaultQuality     types.QualityLevel `mapstructure:"default_quality"`
+	DefaultCachePolicy types.CachePolicy  `mapstructure:"default_cache_policy"`
+
+	// Match context settings
+	EnableScoreTracking   bool `mapstructure:"enable_score_tracking"`
+	EnableActionHistory   bool `mapstructure:"enable_action_history"`
+	HistoryRetentionCount int  `mapstructure:"history_retention_count"`
+
+	// Output settings
+	EnableMetrics         bool          `mapstructure:"enable_metrics"`
+	MetricsUpdateInterval time.Duration `mapstructure:"metrics_update_interval"`
+}
+
+// DefaultIntegrationConfig returns default configuration
+func DefaultIntegrationConfig() *IntegrationConfig {
+	return &IntegrationConfig{
+		EnableContextEnrichment: true,
+		MaxConcurrentRequests:   3,
+		ProcessingTimeout:       5 * time.Second,
+		MinConfidenceThreshold:  0.6,
+		EnableDuplicateFilter:   true,
+		DuplicateTimeWindow:     2 * time.Second,
+		DefaultQuality:          types.QualityLevelBalanced,
+		DefaultCachePolicy:      types.CachePolicyDefault,
+		EnableScoreTracking:     true,
+		EnableActionHistory:     true,
+		HistoryRetentionCount:   10,
+		EnableMetrics:           true,
+		MetricsUpdateInterval:   30 * time.Second,
+	}
+}
+
+// TranscriptionEvent represents a transcription with enriched context
+type TranscriptionEvent struct {
+	Transcription  *speechtypes.TranscriptionResult
+	Timestamp      time.Time
+	Processed      bool
+	Commentary     *types.Commentary
+	ProcessingTime time.Duration
+}
+
+// IntegrationMetrics tracks integration performance
+type IntegrationMetrics struct {
+	// Processing metrics
+	TotalTranscriptions     uint64 `json:"total_transcriptions"`
+	ProcessedTranscriptions uint64 `json:"processed_transcriptions"`
+	FilteredTranscriptions  uint64 `json:"filtered_transcriptions"`
+	FailedTranscriptions    uint64 `json:"failed_transcriptions"`
+
+	// Timing metrics
+	AvgProcessingTime time.Duration `json:"avg_processing_time"`
+	MaxProcessingTime time.Duration `json:"max_processing_time"`
+
+	// Quality metrics
+	AvgInputConfidence  float32 `json:"avg_input_confidence"`
+	AvgOutputConfidence float32 `json:"avg_output_confidence"`
+
+	// Error metrics
+	TimeoutErrors       uint64 `json:"timeout_errors"`
+	QualityFilterErrors uint64 `json:"quality_filter_errors"`
+	GenerationErrors    uint64 `json:"generation_errors"`
+
+	// Match context
+	ScoreUpdates       uint64 `json:"score_updates"`
+	ContextEnrichments uint64 `json:"context_enrichments"`
+
+	// Timestamp
+	LastUpdated time.Time `json:"last_updated"`
+	StartTime   time.Time `json:"start_time"`
+}
+
+// NewIntegrationManager creates a new integration manager
+func NewIntegrationManager(
+	generator *engine.CommentaryGenerator,
+	config *IntegrationConfig,
+	logger zerolog.Logger,
+) *IntegrationManager {
+	if config == nil {
+		config = DefaultIntegrationConfig()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &IntegrationManager{
+		commentaryGenerator: generator,
+		config:              config,
+		logger:              logger.With().Str("component", "integration-manager").Logger(),
+		maxHistory:          config.HistoryRetentionCount,
+		ctx:                 ctx,
+		cancel:              cancel,
+		metrics: &IntegrationMetrics{
+			StartTime:   time.Now(),
+			LastUpdated: time.Now(),
+		},
+		matchState: &types.MatchContext{
+			ScoreRed:      0,
+			ScoreBlue:     0,
+			Period:        1,
+			TimeRemaining: 3 * time.Minute, // Default match time
+			MatchPhase:    "opening",
+			Intensity:     "medium",
+		},
+	}
+}
+
+// Start starts the integration manager
+func (im *IntegrationManager) Start(
+	speechInput <-chan *speechtypes.TranscriptionResult,
+	commentaryOutput chan<- *types.Commentary,
+	errorOutput chan<- error,
+) error {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+
+	if im.active {
+		return fmt.Errorf("integration manager already active")
+	}
+
+	im.speechInput = speechInput
+	im.commentaryOutput = commentaryOutput
+	im.errorOutput = errorOutput
+
+	// Start processing goroutine
+	im.wg.Add(1)
+	go im.processTranscriptions()
+
+	// Start metrics updater if enabled
+	if im.config.EnableMetrics {
+		im.wg.Add(1)
+		go im.updateMetrics()
+	}
+
+	im.active = true
+	im.logger.Info().
+		Int("max_concurrent", im.config.MaxConcurrentRequests).
+		Dur("timeout", im.config.ProcessingTimeout).
+		Float32("min_confidence", im.config.MinConfidenceThreshold).
+		Msg("Integration manager started")
+
+	return nil
+}
+
+// Stop stops the integration manager
+func (im *IntegrationManager) Stop() error {
+	im.mu.Lock()
+	if !im.active {
+		im.mu.Unlock()
+		return nil
+	}
+
+	im.active = false
+	im.cancel()
+	im.mu.Unlock()
+
+	// Wait for goroutines to finish
+	im.wg.Wait()
+
+	im.logger.Info().Msg("Integration manager stopped")
+	return nil
+}
+
+// processTranscriptions processes incoming speech transcriptions
+func (im *IntegrationManager) processTranscriptions() {
+	defer im.wg.Done()
+
+	semaphore := make(chan struct{}, im.config.MaxConcurrentRequests)
+
+	for {
+		select {
+		case transcription := <-im.speechInput:
+			if transcription == nil {
+				continue
+			}
+
+			// Acquire semaphore slot
+			select {
+			case semaphore <- struct{}{}:
+				// Process transcription in goroutine
+				im.wg.Add(1)
+				go func(t *speechtypes.TranscriptionResult) {
+					defer func() {
+						<-semaphore // Release semaphore slot
+						im.wg.Done()
+					}()
+
+					im.processTranscription(t)
+				}(transcription)
+
+			case <-im.ctx.Done():
+				return
+			}
+
+		case <-im.ctx.Done():
+			return
+		}
+	}
+}
+
+// processTranscription processes a single transcription
+func (im *IntegrationManager) processTranscription(transcription *speechtypes.TranscriptionResult) {
+	startTime := time.Now()
+
+	// Update metrics
+	im.mu.Lock()
+	im.metrics.TotalTranscriptions++
+	im.metrics.AvgInputConfidence = updateAverage(
+		im.metrics.AvgInputConfidence,
+		float32(transcription.Confidence),
+		im.metrics.TotalTranscriptions,
+	)
+	im.mu.Unlock()
+
+	// Apply filters
+	if !im.shouldProcess(transcription) {
+		im.mu.Lock()
+		im.metrics.FilteredTranscriptions++
+		im.mu.Unlock()
+		return
+	}
+
+	// Create transcription event
+	event := &TranscriptionEvent{
+		Transcription: transcription,
+		Timestamp:     time.Now(),
+		Processed:     false,
+	}
+
+	// Add to history
+	im.addToHistory(event)
+
+	// Update match context
+	if im.config.EnableScoreTracking {
+		im.updateMatchContext(transcription)
+	}
+
+	// Create commentary request
+	request := &types.CommentaryRequest{
+		Input: types.TranscriptionInput{
+			Text:       transcription.Text,
+			Confidence: float32(transcription.Confidence),
+			Timestamp:  transcription.ProcessedAt, // Use ProcessedAt instead of Timestamp
+			Context:    im.getMatchContext(),
+		},
+		MaxLatency:  im.config.ProcessingTimeout,
+		Quality:     im.config.DefaultQuality,
+		CachePolicy: im.config.DefaultCachePolicy,
+	}
+
+	// Add basic audio metrics derived from metadata
+	// Since AudioQuality is not available directly, we derive from metadata
+	if transcription.Metadata.AudioQuality > 0 {
+		request.Input.AudioMetrics = &types.AudioQuality{
+			SignalToNoise:   float32(transcription.Metadata.AudioQuality),
+			Clarity:         float32(transcription.Metadata.AudioQuality),
+			VoiceDetection:  true,                                               // Assume voice was detected if we got transcription
+			BackgroundNoise: 1.0 - float32(transcription.Metadata.AudioQuality), // Inverse of quality
+			Distortion:      0.2,                                                // Default low distortion
+		}
+	}
+
+	// Generate commentary
+	ctx, cancel := context.WithTimeout(im.ctx, im.config.ProcessingTimeout)
+	defer cancel()
+
+	response, err := im.commentaryGenerator.Generate(ctx, request)
+
+	processingTime := time.Since(startTime)
+	event.ProcessingTime = processingTime
+
+	if err != nil {
+		im.handleError(fmt.Errorf("commentary generation failed: %w", err))
+
+		im.mu.Lock()
+		im.metrics.FailedTranscriptions++
+		if ctx.Err() == context.DeadlineExceeded {
+			im.metrics.TimeoutErrors++
+		} else {
+			im.metrics.GenerationErrors++
+		}
+		im.mu.Unlock()
+		return
+	}
+
+	if !response.Success {
+		im.handleError(fmt.Errorf("commentary generation unsuccessful: %s", response.Error))
+
+		im.mu.Lock()
+		im.metrics.FailedTranscriptions++
+		im.metrics.GenerationErrors++
+		im.mu.Unlock()
+		return
+	}
+
+	// Update event and metrics
+	event.Commentary = response.Commentary
+	event.Processed = true
+
+	im.mu.Lock()
+	im.metrics.ProcessedTranscriptions++
+	im.metrics.AvgProcessingTime = updateAverageDuration(
+		im.metrics.AvgProcessingTime,
+		processingTime,
+		im.metrics.ProcessedTranscriptions,
+	)
+
+	if processingTime > im.metrics.MaxProcessingTime {
+		im.metrics.MaxProcessingTime = processingTime
+	}
+
+	if response.Commentary != nil {
+		im.metrics.AvgOutputConfidence = updateAverage(
+			im.metrics.AvgOutputConfidence,
+			response.Commentary.Confidence,
+			im.metrics.ProcessedTranscriptions,
+		)
+	}
+	im.mu.Unlock()
+
+	// Send commentary to output channel
+	select {
+	case im.commentaryOutput <- response.Commentary:
+		im.logger.Debug().
+			Str("input", transcription.Text).
+			Str("commentary", response.Commentary.Text).
+			Dur("processing_time", processingTime).
+			Str("source", response.Commentary.Source).
+			Msg("Commentary generated and sent")
+
+	case <-im.ctx.Done():
+		return
+	}
+}
+
+// shouldProcess determines if a transcription should be processed
+func (im *IntegrationManager) shouldProcess(transcription *speechtypes.TranscriptionResult) bool {
+	// Check confidence threshold
+	if float32(transcription.Confidence) < im.config.MinConfidenceThreshold {
+		im.logger.Debug().
+			Str("text", transcription.Text).
+			Float32("confidence", float32(transcription.Confidence)).
+			Float32("threshold", im.config.MinConfidenceThreshold).
+			Msg("Transcription filtered by confidence threshold")
+		return false
+	}
+
+	// Check for duplicates if enabled
+	if im.config.EnableDuplicateFilter {
+		if im.isDuplicate(transcription) {
+			im.logger.Debug().
+				Str("text", transcription.Text).
+				Msg("Transcription filtered as duplicate")
+			return false
+		}
+	}
+
+	return true
+}
+
+// isDuplicate checks if a transcription is a duplicate of recent ones
+func (im *IntegrationManager) isDuplicate(transcription *speechtypes.TranscriptionResult) bool {
+	im.mu.RLock()
+	defer im.mu.RUnlock()
+
+	cutoffTime := time.Now().Add(-im.config.DuplicateTimeWindow)
+
+	for i := len(im.callHistory) - 1; i >= 0; i-- {
+		event := im.callHistory[i]
+
+		// Stop checking if we've gone beyond the time window
+		if event.Timestamp.Before(cutoffTime) {
+			break
+		}
+
+		// Check for similar text
+		if im.isSimilarText(transcription.Text, event.Transcription.Text) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isSimilarText checks if two texts are similar enough to be considered duplicates
+func (im *IntegrationManager) isSimilarText(text1, text2 string) bool {
+	// Simple similarity check - could be enhanced with more sophisticated algorithms
+	if text1 == text2 {
+		return true
+	}
+
+	// Check if one text is contained in the other (for partial transcriptions)
+	if len(text1) > len(text2) {
+		return len(text2) > 5 && strings.Contains(text1, text2)
+	} else {
+		return len(text1) > 5 && strings.Contains(text2, text1)
+	}
+}
+
+// updateMatchContext updates the match state based on transcription content
+func (im *IntegrationManager) updateMatchContext(transcription *speechtypes.TranscriptionResult) {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+
+	text := strings.ToLower(transcription.Text)
+
+	// Update score based on keywords
+	if strings.Contains(text, "point") {
+		if strings.Contains(text, "left") || strings.Contains(text, "red") {
+			im.matchState.ScoreRed++
+			im.matchState.LastScorer = "red"
+			im.metrics.ScoreUpdates++
+		} else if strings.Contains(text, "right") || strings.Contains(text, "blue") {
+			im.matchState.ScoreBlue++
+			im.matchState.LastScorer = "blue"
+			im.metrics.ScoreUpdates++
+		}
+	}
+
+	// Update last action
+	if strings.Contains(text, "halt") {
+		im.matchState.LastAction = "halt"
+	} else if strings.Contains(text, "double") {
+		im.matchState.LastAction = "double_hit"
+	} else if strings.Contains(text, "point") {
+		im.matchState.LastAction = "point_scored"
+	} else {
+		im.matchState.LastAction = "unknown"
+	}
+
+	// Update match phase based on score
+	totalScore := im.matchState.ScoreRed + im.matchState.ScoreBlue
+	if totalScore == 0 {
+		im.matchState.MatchPhase = "opening"
+	} else if totalScore < 8 {
+		im.matchState.MatchPhase = "middle"
+	} else {
+		im.matchState.MatchPhase = "closing"
+	}
+
+	// Add to recent actions
+	if len(im.matchState.RecentActions) >= 5 {
+		im.matchState.RecentActions = im.matchState.RecentActions[1:]
+	}
+	im.matchState.RecentActions = append(im.matchState.RecentActions, transcription.Text)
+}
+
+// addToHistory adds a transcription event to the call history
+func (im *IntegrationManager) addToHistory(event *TranscriptionEvent) {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+
+	im.callHistory = append(im.callHistory, *event)
+
+	// Keep only recent history
+	if len(im.callHistory) > im.maxHistory {
+		im.callHistory = im.callHistory[1:]
+	}
+}
+
+// getMatchContext returns a copy of the current match context
+func (im *IntegrationManager) getMatchContext() *types.MatchContext {
+	im.mu.RLock()
+	defer im.mu.RUnlock()
+
+	// Return a copy to avoid race conditions
+	context := *im.matchState
+	return &context
+}
+
+// handleError handles integration errors
+func (im *IntegrationManager) handleError(err error) {
+	im.logger.Error().Err(err).Msg("Integration error")
+
+	select {
+	case im.errorOutput <- err:
+		// Error sent successfully
+	case <-im.ctx.Done():
+		// Context cancelled, don't block
+	default:
+		// Error channel full, log and continue
+		im.logger.Warn().Err(err).Msg("Error channel full, dropping error")
+	}
+}
+
+// updateMetrics periodically updates metrics
+func (im *IntegrationManager) updateMetrics() {
+	defer im.wg.Done()
+
+	ticker := time.NewTicker(im.config.MetricsUpdateInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			im.mu.Lock()
+			im.metrics.LastUpdated = time.Now()
+			im.mu.Unlock()
+
+		case <-im.ctx.Done():
+			return
+		}
+	}
+}
+
+// GetMetrics returns current integration metrics
+func (im *IntegrationManager) GetMetrics() *IntegrationMetrics {
+	im.mu.RLock()
+	defer im.mu.RUnlock()
+
+	// Return a copy
+	metrics := *im.metrics
+	return &metrics
+}
+
+// GetStatus returns the current status of the integration manager
+func (im *IntegrationManager) GetStatus() map[string]interface{} {
+	im.mu.RLock()
+	defer im.mu.RUnlock()
+
+	return map[string]interface{}{
+		"active":            im.active,
+		"match_state":       im.matchState,
+		"call_history_size": len(im.callHistory),
+		"metrics":           im.metrics,
+		"config":            im.config,
+	}
+}
+
+// Utility functions
+
+func updateAverage(current float32, newValue float32, count uint64) float32 {
+	if count <= 1 {
+		return newValue
+	}
+	return (current*float32(count-1) + newValue) / float32(count)
+}
+
+func updateAverageDuration(current time.Duration, newValue time.Duration, count uint64) time.Duration {
+	if count <= 1 {
+		return newValue
+	}
+	return time.Duration((int64(current)*int64(count-1) + int64(newValue)) / int64(count))
+}
+</file>
+
+<file path="prompt/builder_test.go">
+package prompt
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/context"
+	"github.com/your-org/hema-replay-system/pkg/commentary/templates"
+)
+
+func TestNewBuilder(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	assert.NotNil(t, builder)
+	assert.NotNil(t, builder.config)
+	assert.Equal(t, DefaultBuilderConfig(), builder.config)
+}
+
+func TestBuilder_Build_BasicFunctionality(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	// Register HEMA templates
+	err := templates.RegisterHEMATemplates()
+	require.NoError(t, err)
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	tests := []struct {
+		name    string
+		request *BuildRequest
+		wantErr bool
+	}{
+		{
+			name: "valid_request",
+			request: &BuildRequest{
+				Transcription: "Point left",
+				Confidence:    0.95,
+				Timestamp:     time.Now(),
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty_transcription",
+			request: &BuildRequest{
+				Transcription: "",
+				Confidence:    0.95,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid_confidence",
+			request: &BuildRequest{
+				Transcription: "Point left",
+				Confidence:    1.5,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := builder.Build(tt.request)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+				assert.NotEmpty(t, result.Prompt)
+				assert.NotEmpty(t, result.TemplateID)
+				assert.Greater(t, result.BuildTime, time.Duration(0))
+			}
+		})
+	}
+}
+
+func TestBuilder_TemplateSelection(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	err := templates.RegisterHEMATemplates()
+	require.NoError(t, err)
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	tests := []struct {
+		name               string
+		transcription      string
+		expectedTemplateID string
+		matchState         *context.MatchState
+	}{
+		{
+			name:               "point_detection",
+			transcription:      "Point left clean hit",
+			expectedTemplateID: "point_scored",
+		},
+		{
+			name:               "double_hit_detection",
+			transcription:      "Double hit both fencers",
+			expectedTemplateID: "double_hit",
+		},
+		{
+			name:               "explicit_template",
+			transcription:      "Any text",
+			expectedTemplateID: "halt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.matchState != nil {
+				contextManager.UpdateMatchState(tt.matchState)
+			}
+
+			request := &BuildRequest{
+				Transcription: tt.transcription,
+				Confidence:    0.95,
+				Timestamp:     time.Now(),
+			}
+
+			// For explicit template test, set the template ID
+			if tt.name == "explicit_template" {
+				request.TemplateID = "halt"
+			}
+
+			result, err := builder.Build(request)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedTemplateID, result.TemplateID)
+		})
+	}
+}
+
+func TestBuilder_ContextEnrichment(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	err := templates.RegisterHEMATemplates()
+	require.NoError(t, err)
+
+	// Set up rich context
+	matchState := context.NewMatchState()
+	matchState.ScoreRed = 3
+	matchState.ScoreBlue = 2
+	matchState.TimeRemaining = time.Second * 30
+	contextManager.UpdateMatchState(matchState)
+
+	contextManager.AddCall("Point left")
+	contextManager.AddCall("Point right")
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	request := &BuildRequest{
+		Transcription: "Point left excellent attack",
+		Confidence:    0.95,
+		Timestamp:     time.Now(),
+		ExtraContext: map[string]string{
+			"technique": "thrust",
+		},
+	}
+
+	result, err := builder.Build(request)
+	require.NoError(t, err)
+
+	// Verify context enrichment worked
+	assert.NotEmpty(t, result.UsedContext)
+	assert.Contains(t, result.UsedContext, "technique")
+	assert.Equal(t, "thrust", result.UsedContext["technique"])
+}
+
+func TestBuilder_AudioMetrics(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	err := templates.RegisterHEMATemplates()
+	require.NoError(t, err)
+
+	config := &BuilderConfig{
+		EnableContextEnrichment: true,
+		IncludeAudioMetrics:     true,
+		IncludeConfidence:       true,
+		IncludeTimestamp:        true,
+	}
+
+	builder := NewBuilder(templateManager, contextManager, config, logger)
+
+	audioMetrics := &templates.AudioMetrics{
+		Volume:       0.8,
+		Clarity:      0.9,
+		NoiseLevel:   0.1,
+		VoicePresent: true,
+	}
+
+	request := &BuildRequest{
+		Transcription: "Point left",
+		Confidence:    0.95,
+		Timestamp:     time.Now(),
+		AudioMetrics:  audioMetrics,
+	}
+
+	result, err := builder.Build(request)
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.Prompt)
+}
+
+func TestBuilder_PromptTrimming(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	// Create a template that generates very long prompts
+	longTemplate := &templates.PromptTemplate{
+		ID:       "long_template",
+		Template: strings.Repeat("This is a very long prompt that will exceed the maximum length. ", 20),
+	}
+	err := templateManager.RegisterTemplate(longTemplate)
+	require.NoError(t, err)
+
+	config := &BuilderConfig{
+		MaxPromptLength: 100, // Short limit
+	}
+
+	builder := NewBuilder(templateManager, contextManager, config, logger)
+
+	request := &BuildRequest{
+		Transcription: "Point left",
+		Confidence:    0.95,
+		Timestamp:     time.Now(),
+		TemplateID:    "long_template", // Force use of long template
+	}
+
+	result, err := builder.Build(request)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(result.Prompt), 105) // Allow some margin for ellipsis
+}
+
+func TestBuilder_FallbackBehavior(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	tests := []struct {
+		name             string
+		fallbackBehavior string
+		templateID       string
+		expectError      bool
+	}{
+		{
+			name:             "fallback_to_simple",
+			fallbackBehavior: "simple",
+			templateID:       "nonexistent_template",
+			expectError:      false,
+		},
+		{
+			name:             "fallback_none",
+			fallbackBehavior: "none",
+			templateID:       "nonexistent_template",
+			expectError:      true,
+		},
+		{
+			name:             "fallback_default",
+			fallbackBehavior: "default",
+			templateID:       "nonexistent_template",
+			expectError:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &BuilderConfig{
+				FallbackBehavior: tt.fallbackBehavior,
+				DefaultTemplate:  "point_scored",
+			}
+
+			// Register at least the default template
+			err := templates.RegisterHEMATemplates()
+			require.NoError(t, err)
+
+			builder := NewBuilder(templateManager, contextManager, config, logger)
+
+			request := &BuildRequest{
+				Transcription: "Point left",
+				Confidence:    0.95,
+				Timestamp:     time.Now(),
+				TemplateID:    tt.templateID,
+			}
+
+			result, err := builder.Build(request)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+				assert.NotEmpty(t, result.Prompt)
+			}
+		})
+	}
+}
+
+func TestBuilder_BatchBuild(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	err := templates.RegisterHEMATemplates()
+	require.NoError(t, err)
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	requests := []*BuildRequest{
+		{
+			Transcription: "Point left",
+			Confidence:    0.95,
+			Timestamp:     time.Now(),
+		},
+		{
+			Transcription: "Double hit",
+			Confidence:    0.90,
+			Timestamp:     time.Now(),
+		},
+		{
+			Transcription: "", // Invalid request
+			Confidence:    0.85,
+		},
+	}
+
+	results, errors := builder.BatchBuild(requests)
+
+	assert.Len(t, results, 3)
+	assert.Len(t, errors, 3)
+
+	// First two should succeed
+	assert.NoError(t, errors[0])
+	assert.NoError(t, errors[1])
+	assert.NotNil(t, results[0])
+	assert.NotNil(t, results[1])
+
+	// Third should fail
+	assert.Error(t, errors[2])
+	assert.Nil(t, results[2])
+}
+
+func TestBuilderConfig_DefaultValues(t *testing.T) {
+	config := DefaultBuilderConfig()
+
+	assert.True(t, config.EnableContextEnrichment)
+	assert.Equal(t, 500, config.MaxPromptLength)
+	assert.Equal(t, "point_scored", config.DefaultTemplate)
+	assert.Equal(t, float32(1.0), config.ContextWeight)
+	assert.False(t, config.IncludeTimestamp)
+	assert.True(t, config.IncludeConfidence)
+	assert.False(t, config.IncludeAudioMetrics)
+	assert.Equal(t, "default", config.FallbackBehavior)
+}
+
+func TestBuilder_GetStats(t *testing.T) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	err := templates.RegisterHEMATemplates()
+	require.NoError(t, err)
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	stats := builder.GetStats()
+	assert.NotNil(t, stats)
+	assert.Contains(t, stats, "template_count")
+	assert.Contains(t, stats, "config")
+
+	templateCount, ok := stats["template_count"].(int)
+	assert.True(t, ok)
+	assert.Greater(t, templateCount, 0) // Should have HEMA templates
+}
+
+// Integration test combining multiple components
+func TestFullPromptGenerationPipeline(t *testing.T) {
+	logger := zerolog.Nop()
+
+	// Set up all components
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	// Register templates
+	err := templates.RegisterHEMATemplates()
+	require.NoError(t, err)
+
+	// Set up match context
+	matchState := context.NewMatchState()
+	matchState.UpdateScore("left")
+	matchState.UpdateScore("right")
+	matchState.UpdateScore("left") // 2-1
+	contextManager.UpdateMatchState(matchState)
+
+	// Add call history
+	contextManager.AddCall("Fence")
+	contextManager.AddCall("Point left")
+	contextManager.AddCall("Point right")
+
+	// Build prompt
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	request := &BuildRequest{
+		Transcription: "Point left excellent thrust",
+		Confidence:    0.95,
+		Timestamp:     time.Now(),
+		ExtraContext: map[string]string{
+			"technique": "thrust",
+			"quality":   "excellent",
+		},
+	}
+
+	result, err := builder.Build(request)
+	require.NoError(t, err)
+
+	// Verify comprehensive result
+	assert.NotEmpty(t, result.Prompt)
+	assert.Equal(t, "point_scored", result.TemplateID)
+	assert.Greater(t, result.BuildTime, time.Duration(0))
+	assert.NotEmpty(t, result.UsedContext)
+
+	// Check that the prompt contains expected elements
+	assert.Contains(t, result.Prompt, "Point left excellent thrust")
+
+	// Verify metadata
+	assert.NotNil(t, result.Metadata)
+	assert.Contains(t, result.Metadata, "template_category")
+
+	t.Logf("Generated prompt: %s", result.Prompt)
+	t.Logf("Build time: %v", result.BuildTime)
+	t.Logf("Used context: %+v", result.UsedContext)
+}
+
+// Benchmark tests
+func BenchmarkBuilder_Build(b *testing.B) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	err := templates.RegisterHEMATemplates()
+	require.NoError(b, err)
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	request := &BuildRequest{
+		Transcription: "Point left clean hit",
+		Confidence:    0.95,
+		Timestamp:     time.Now(),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := builder.Build(request)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBuilder_BatchBuild(b *testing.B) {
+	logger := zerolog.Nop()
+	templateManager := templates.NewTemplateManager()
+	contextManager := context.NewContextManager(logger)
+
+	err := templates.RegisterHEMATemplates()
+	require.NoError(b, err)
+
+	builder := NewBuilder(templateManager, contextManager, nil, logger)
+
+	requests := []*BuildRequest{
+		{Transcription: "Point left", Confidence: 0.95, Timestamp: time.Now()},
+		{Transcription: "Double hit", Confidence: 0.90, Timestamp: time.Now()},
+		{Transcription: "Halt", Confidence: 0.85, Timestamp: time.Now()},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = builder.BatchBuild(requests)
+	}
+}
+</file>
+
+<file path="prompt/builder.go">
+package prompt
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/context"
+	"github.com/your-org/hema-replay-system/pkg/commentary/templates"
+)
+
+// Builder handles dynamic prompt construction for commentary generation
+type Builder struct {
+	templateManager  *templates.TemplateManager
+	templateSelector *templates.TemplateSelector
+	contextManager   *context.ContextManager
+	logger           zerolog.Logger
+	config           *BuilderConfig
+}
+
+// BuilderConfig configures the prompt builder behavior
+type BuilderConfig struct {
+	EnableContextEnrichment bool    `mapstructure:"enable_context_enrichment"`
+	MaxPromptLength         int     `mapstructure:"max_prompt_length"`
+	DefaultTemplate         string  `mapstructure:"default_template"`
+	ContextWeight           float32 `mapstructure:"context_weight"`
+	IncludeTimestamp        bool    `mapstructure:"include_timestamp"`
+	IncludeConfidence       bool    `mapstructure:"include_confidence"`
+	IncludeAudioMetrics     bool    `mapstructure:"include_audio_metrics"`
+	FallbackBehavior        string  `mapstructure:"fallback_behavior"` // "default", "simple", "none"
+}
+
+// DefaultBuilderConfig returns default configuration for the prompt builder
+func DefaultBuilderConfig() *BuilderConfig {
+	return &BuilderConfig{
+		EnableContextEnrichment: true,
+		MaxPromptLength:         500,
+		DefaultTemplate:         "point_scored",
+		ContextWeight:           1.0,
+		IncludeTimestamp:        false,
+		IncludeConfidence:       true,
+		IncludeAudioMetrics:     false,
+		FallbackBehavior:        "default",
+	}
+}
+
+// NewBuilder creates a new prompt builder
+func NewBuilder(
+	templateManager *templates.TemplateManager,
+	contextManager *context.ContextManager,
+	config *BuilderConfig,
+	logger zerolog.Logger,
+) *Builder {
+	if config == nil {
+		config = DefaultBuilderConfig()
+	}
+
+	return &Builder{
+		templateManager:  templateManager,
+		templateSelector: templates.NewTemplateSelector(),
+		contextManager:   contextManager,
+		logger:           logger.With().Str("component", "prompt-builder").Logger(),
+		config:           config,
+	}
+}
+
+// BuildRequest represents a request to build a prompt
+type BuildRequest struct {
+	Transcription string                  `json:"transcription"`
+	Confidence    float32                 `json:"confidence"`
+	Timestamp     time.Time               `json:"timestamp"`
+	AudioMetrics  *templates.AudioMetrics `json:"audio_metrics,omitempty"`
+	TemplateID    string                  `json:"template_id,omitempty"` // Optional override
+	ExtraContext  map[string]string       `json:"extra_context,omitempty"`
+}
+
+// BuildResult represents the result of prompt building
+type BuildResult struct {
+	Prompt       string                 `json:"prompt"`
+	TemplateID   string                 `json:"template_id"`
+	TemplateName string                 `json:"template_name"`
+	UsedContext  map[string]string      `json:"used_context"`
+	PromptLength int                    `json:"prompt_length"`
+	BuildTime    time.Duration          `json:"build_time"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// Build constructs a prompt based on the build request
+func (b *Builder) Build(request *BuildRequest) (*BuildResult, error) {
+	startTime := time.Now()
+
+	if err := b.validateRequest(request); err != nil {
+		return nil, fmt.Errorf("invalid build request: %w", err)
+	}
+
+	// Select template
+	templateID := b.selectTemplate(request)
+
+	template, exists := b.templateManager.GetTemplate(templateID)
+	if !exists {
+		return b.buildFallbackResult(request, fmt.Errorf("template %s not found", templateID))
+	}
+
+	// Build template data
+	templateData, err := b.buildTemplateData(request)
+	if err != nil {
+		return b.buildFallbackResult(request, fmt.Errorf("failed to build template data: %w", err))
+	}
+
+	// Execute template
+	prompt, err := b.templateManager.ExecuteTemplate(templateID, templateData)
+	if err != nil {
+		return b.buildFallbackResult(request, fmt.Errorf("failed to execute template: %w", err))
+	}
+
+	// Validate and trim prompt if necessary
+	prompt = b.validateAndTrimPrompt(prompt)
+
+	buildTime := time.Since(startTime)
+
+	result := &BuildResult{
+		Prompt:       prompt,
+		TemplateID:   templateID,
+		TemplateName: template.Name,
+		UsedContext:  templateData.Context,
+		PromptLength: len(prompt),
+		BuildTime:    buildTime,
+		Metadata:     make(map[string]interface{}),
+	}
+
+	// Add metadata
+	result.Metadata["template_category"] = template.Metadata["category"]
+	result.Metadata["template_priority"] = template.Metadata["priority"]
+	result.Metadata["build_timestamp"] = startTime
+
+	b.logger.Debug().
+		Str("template_id", templateID).
+		Str("template_name", template.Name).
+		Int("prompt_length", len(prompt)).
+		Dur("build_time", buildTime).
+		Msg("Built prompt successfully")
+
+	return result, nil
+}
+
+// selectTemplate selects the appropriate template for the request
+func (b *Builder) selectTemplate(request *BuildRequest) string {
+	// Use explicit template ID if provided
+	if request.TemplateID != "" {
+		if _, exists := b.templateManager.GetTemplate(request.TemplateID); exists {
+			return request.TemplateID
+		}
+		b.logger.Warn().
+			Str("requested_template", request.TemplateID).
+			Msg("Requested template not found, using selector")
+	}
+
+	// Get match state for template selection
+	matchState := b.contextManager.GetMatchState()
+
+	// Use template selector
+	selectedID := b.templateSelector.SelectTemplate(request.Transcription, matchState)
+
+	// Verify selected template exists
+	if _, exists := b.templateManager.GetTemplate(selectedID); !exists {
+		b.logger.Warn().
+			Str("selected_template", selectedID).
+			Str("fallback_template", b.config.DefaultTemplate).
+			Msg("Selected template not found, using default")
+		return b.config.DefaultTemplate
+	}
+
+	return selectedID
+}
+
+// buildTemplateData constructs the data structure for template execution
+func (b *Builder) buildTemplateData(request *BuildRequest) (*templates.TemplateData, error) {
+	data := &templates.TemplateData{
+		Transcription: request.Transcription,
+		Confidence:    request.Confidence,
+		Timestamp:     request.Timestamp,
+		Context:       make(map[string]string),
+	}
+
+	// Add match state
+	data.MatchState = b.contextManager.GetMatchState()
+
+	// Add audio metrics if configured
+	if b.config.IncludeAudioMetrics && request.AudioMetrics != nil {
+		data.AudioMetrics = request.AudioMetrics
+	}
+
+	// Add recent calls context
+	data.PreviousCalls = b.contextManager.GetRecentCalls(3)
+
+	// Enrich context if enabled
+	if b.config.EnableContextEnrichment {
+		enrichedContext := b.contextManager.EnrichContext(request.Transcription)
+		for k, v := range enrichedContext {
+			data.Context[k] = v
+		}
+	}
+
+	// Add extra context from request
+	if request.ExtraContext != nil {
+		for k, v := range request.ExtraContext {
+			data.Context[k] = v
+		}
+	}
+
+	// Add build-time context
+	if b.config.IncludeTimestamp {
+		data.Context["timestamp"] = request.Timestamp.Format(time.RFC3339)
+	}
+
+	if b.config.IncludeConfidence {
+		data.Context["confidence"] = fmt.Sprintf("%.2f", request.Confidence)
+	}
+
+	return data, nil
+}
+
+// validateRequest validates the build request
+func (b *Builder) validateRequest(request *BuildRequest) error {
+	if request == nil {
+		return fmt.Errorf("request cannot be nil")
+	}
+
+	if request.Transcription == "" {
+		return fmt.Errorf("transcription cannot be empty")
+	}
+
+	if request.Confidence < 0 || request.Confidence > 1 {
+		return fmt.Errorf("confidence must be between 0 and 1, got %f", request.Confidence)
+	}
+
+	if request.Timestamp.IsZero() {
+		request.Timestamp = time.Now()
+	}
+
+	return nil
+}
+
+// validateAndTrimPrompt validates and trims the prompt if necessary
+func (b *Builder) validateAndTrimPrompt(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+
+	if len(prompt) > b.config.MaxPromptLength {
+		// Trim to max length, trying to break at sentence boundaries
+		truncated := prompt[:b.config.MaxPromptLength]
+
+		// Try to find the last sentence boundary
+		lastPeriod := strings.LastIndex(truncated, ".")
+		lastExclamation := strings.LastIndex(truncated, "!")
+		lastQuestion := strings.LastIndex(truncated, "?")
+
+		lastSentence := lastPeriod
+		if lastExclamation > lastSentence {
+			lastSentence = lastExclamation
+		}
+		if lastQuestion > lastSentence {
+			lastSentence = lastQuestion
+		}
+
+		if lastSentence > 0 && lastSentence > len(truncated)*3/4 {
+			// If we found a sentence boundary in the last quarter, use it
+			prompt = truncated[:lastSentence+1]
+		} else {
+			// Otherwise, just truncate and add ellipsis
+			prompt = truncated + "..."
+		}
+
+		b.logger.Warn().
+			Int("original_length", len(prompt)).
+			Int("max_length", b.config.MaxPromptLength).
+			Int("final_length", len(prompt)).
+			Msg("Prompt was truncated")
+	}
+
+	return prompt
+}
+
+// buildFallbackResult builds a fallback result when template building fails
+func (b *Builder) buildFallbackResult(request *BuildRequest, originalErr error) (*BuildResult, error) {
+	b.logger.Error().Err(originalErr).Msg("Template building failed, using fallback")
+
+	switch b.config.FallbackBehavior {
+	case "simple":
+		return b.buildSimpleFallback(request), nil
+	case "none":
+		return nil, originalErr
+	default: // "default"
+		return b.buildDefaultFallback(request), nil
+	}
+}
+
+// buildSimpleFallback creates a very basic prompt
+func (b *Builder) buildSimpleFallback(request *BuildRequest) *BuildResult {
+	prompt := fmt.Sprintf("Comment on this HEMA judge call: \"%s\"", request.Transcription)
+
+	return &BuildResult{
+		Prompt:       prompt,
+		TemplateID:   "simple_fallback",
+		TemplateName: "Simple Fallback",
+		UsedContext:  make(map[string]string),
+		PromptLength: len(prompt),
+		BuildTime:    0,
+		Metadata: map[string]interface{}{
+			"fallback": "simple",
+		},
+	}
+}
+
+// buildDefaultFallback creates a fallback using the default template
+func (b *Builder) buildDefaultFallback(request *BuildRequest) *BuildResult {
+	// Try to use the default template
+	template, exists := b.templateManager.GetTemplate(b.config.DefaultTemplate)
+	if !exists {
+		return b.buildSimpleFallback(request)
+	}
+
+	// Create minimal template data
+	data := &templates.TemplateData{
+		Transcription: request.Transcription,
+		Confidence:    request.Confidence,
+		Timestamp:     request.Timestamp,
+		Context:       make(map[string]string),
+	}
+
+	prompt, err := b.templateManager.ExecuteTemplate(b.config.DefaultTemplate, data)
+	if err != nil {
+		b.logger.Error().Err(err).Msg("Default template execution failed")
+		return b.buildSimpleFallback(request)
+	}
+
+	return &BuildResult{
+		Prompt:       prompt,
+		TemplateID:   b.config.DefaultTemplate,
+		TemplateName: template.Name,
+		UsedContext:  data.Context,
+		PromptLength: len(prompt),
+		BuildTime:    0,
+		Metadata: map[string]interface{}{
+			"fallback": "default_template",
+		},
+	}
+}
+
+// BatchBuild builds multiple prompts in a batch
+func (b *Builder) BatchBuild(requests []*BuildRequest) ([]*BuildResult, []error) {
+	results := make([]*BuildResult, len(requests))
+	errors := make([]error, len(requests))
+
+	for i, request := range requests {
+		result, err := b.Build(request)
+		results[i] = result
+		errors[i] = err
+	}
+
+	return results, errors
+}
+
+// GetStats returns builder statistics
+func (b *Builder) GetStats() map[string]interface{} {
+	return map[string]interface{}{
+		"template_count": len(b.templateManager.ListTemplates()),
+		"config":         b.config,
+	}
+}
+</file>
+
+<file path="templates/base_test.go">
+package templates
+
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/context"
+)
+
+func TestTemplateManager_RegisterTemplate(t *testing.T) {
+	tm := NewTemplateManager()
+
+	tests := []struct {
+		name        string
+		template    *PromptTemplate
+		expectError bool
+	}{
+		{
+			name: "valid_template",
+			template: &PromptTemplate{
+				ID:       "test_template",
+				Name:     "Test Template",
+				Template: "Hello {{.Name}}!",
+			},
+			expectError: false,
+		},
+		{
+			name: "empty_id",
+			template: &PromptTemplate{
+				Name:     "Test Template",
+				Template: "Hello world!",
+			},
+			expectError: true,
+		},
+		{
+			name: "empty_template",
+			template: &PromptTemplate{
+				ID:   "test_template",
+				Name: "Test Template",
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid_template_syntax",
+			template: &PromptTemplate{
+				ID:       "test_template",
+				Name:     "Test Template",
+				Template: "Hello {{.Name}!", // Missing closing brace
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tm.RegisterTemplate(tt.template)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+
+				// Verify template is registered
+				retrieved, exists := tm.GetTemplate(tt.template.ID)
+				assert.True(t, exists)
+				assert.Equal(t, tt.template.ID, retrieved.ID)
+				assert.Equal(t, tt.template.Name, retrieved.Name)
+			}
+		})
+	}
+}
+
+func TestTemplateManager_ExecuteTemplate(t *testing.T) {
+	tm := NewTemplateManager()
+
+	// Register test template
+	template := &PromptTemplate{
+		ID:       "test_template",
+		Name:     "Test Template",
+		Template: "Hello {{.Name}}! Score: {{.Score}}",
+	}
+	err := tm.RegisterTemplate(template)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		templateID  string
+		data        interface{}
+		expected    string
+		expectError bool
+	}{
+		{
+			name:       "valid_execution",
+			templateID: "test_template",
+			data: map[string]interface{}{
+				"Name":  "John",
+				"Score": 5,
+			},
+			expected:    "Hello John! Score: 5",
+			expectError: false,
+		},
+		{
+			name:        "nonexistent_template",
+			templateID:  "nonexistent",
+			data:        map[string]interface{}{},
+			expectError: true,
+		},
+		{
+			name:       "missing_data_field",
+			templateID: "test_template",
+			data: map[string]interface{}{
+				"Name": "John",
+				// Missing Score
+			},
+			expected:    "Hello John! Score: <no value>",
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tm.ExecuteTemplate(tt.templateID, tt.data)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestTemplateManager_ListTemplates(t *testing.T) {
+	tm := NewTemplateManager()
+
+	// Initially empty
+	templates := tm.ListTemplates()
+	assert.Empty(t, templates)
+
+	// Add templates
+	template1 := &PromptTemplate{
+		ID:       "template1",
+		Template: "Template 1",
+	}
+	template2 := &PromptTemplate{
+		ID:       "template2",
+		Template: "Template 2",
+	}
+
+	err := tm.RegisterTemplate(template1)
+	require.NoError(t, err)
+	err = tm.RegisterTemplate(template2)
+	require.NoError(t, err)
+
+	templates = tm.ListTemplates()
+	assert.Len(t, templates, 2)
+	assert.Contains(t, templates, "template1")
+	assert.Contains(t, templates, "template2")
+}
+
+func TestValidateTemplateData(t *testing.T) {
+	tests := []struct {
+		name        string
+		data        *TemplateData
+		expectError bool
+	}{
+		{
+			name: "valid_data",
+			data: &TemplateData{
+				Transcription: "Point left",
+				Confidence:    0.95,
+				Timestamp:     time.Now(),
+			},
+			expectError: false,
+		},
+		{
+			name:        "nil_data",
+			data:        nil,
+			expectError: true,
+		},
+		{
+			name: "empty_transcription",
+			data: &TemplateData{
+				Transcription: "",
+				Confidence:    0.95,
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid_confidence_low",
+			data: &TemplateData{
+				Transcription: "Point left",
+				Confidence:    -0.1,
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid_confidence_high",
+			data: &TemplateData{
+				Transcription: "Point left",
+				Confidence:    1.1,
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTemplateData(tt.data)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDefaultTemplateManager(t *testing.T) {
+	// Test that the default template manager exists and works
+	template := &PromptTemplate{
+		ID:       "test_default",
+		Template: "Default test",
+	}
+
+	err := RegisterDefaultTemplate(template)
+	assert.NoError(t, err)
+
+	retrieved, exists := GetDefaultTemplate("test_default")
+	assert.True(t, exists)
+	assert.Equal(t, "test_default", retrieved.ID)
+
+	result, err := ExecuteDefaultTemplate("test_default", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "Default test", result)
+}
+
+func TestTemplateDataTypes(t *testing.T) {
+	// Test that we can create template data with all field types
+	matchState := &context.MatchState{}
+	audioMetrics := &AudioMetrics{
+		Volume:       0.8,
+		Clarity:      0.9,
+		NoiseLevel:   0.1,
+		VoicePresent: true,
+	}
+
+	data := &TemplateData{
+		Transcription: "Point left",
+		Confidence:    0.95,
+		Timestamp:     time.Now(),
+		MatchState:    matchState,
+		Context:       map[string]string{"test": "value"},
+		AudioMetrics:  audioMetrics,
+		PreviousCalls: []string{"halt", "fence"},
+	}
+
+	// Validate the data structure
+	assert.Equal(t, "Point left", data.Transcription)
+	assert.Equal(t, float32(0.95), data.Confidence)
+	assert.NotNil(t, data.MatchState)
+	assert.NotNil(t, data.Context)
+	assert.NotNil(t, data.AudioMetrics)
+	assert.NotNil(t, data.PreviousCalls)
+
+	// Test validation
+	err := ValidateTemplateData(data)
+	assert.NoError(t, err)
+}
+
+func TestAudioMetrics(t *testing.T) {
+	metrics := &AudioMetrics{
+		Volume:       0.75,
+		Clarity:      0.85,
+		NoiseLevel:   0.15,
+		VoicePresent: true,
+	}
+
+	assert.Equal(t, float32(0.75), metrics.Volume)
+	assert.Equal(t, float32(0.85), metrics.Clarity)
+	assert.Equal(t, float32(0.15), metrics.NoiseLevel)
+	assert.True(t, metrics.VoicePresent)
+}
+
+// Benchmark tests
+func BenchmarkTemplateExecution(b *testing.B) {
+	tm := NewTemplateManager()
+	template := &PromptTemplate{
+		ID:       "benchmark_template",
+		Template: "Commentary for {{.Transcription}} with confidence {{.Confidence}}",
+	}
+	err := tm.RegisterTemplate(template)
+	require.NoError(b, err)
+
+	data := map[string]interface{}{
+		"Transcription": "Point left",
+		"Confidence":    0.95,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := tm.ExecuteTemplate("benchmark_template", data)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkTemplateRegistration(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tm := NewTemplateManager()
+		template := &PromptTemplate{
+			ID:       "benchmark_template",
+			Template: "Test template {{.Field}}",
+		}
+		err := tm.RegisterTemplate(template)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+</file>
+
+<file path="templates/base.go">
+package templates
+
+import (
+	"bytes"
+	"fmt"
+	"strings"
+	"text/template"
+	"time"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/context"
+)
+
+// PromptTemplate represents a template for generating commentary prompts
+type PromptTemplate struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Template    string            `json:"template"`
+	Variables   []string          `json:"variables"`
+	MaxTokens   int               `json:"max_tokens"`
+	Temperature float32           `json:"temperature"`
+	Metadata    map[string]string `json:"metadata"`
+}
+
+// TemplateManager manages prompt templates and their execution
+type TemplateManager struct {
+	templates map[string]*PromptTemplate
+	compiled  map[string]*template.Template
+}
+
+// NewTemplateManager creates a new template manager
+func NewTemplateManager() *TemplateManager {
+	return &TemplateManager{
+		templates: make(map[string]*PromptTemplate),
+		compiled:  make(map[string]*template.Template),
+	}
+}
+
+// RegisterTemplate registers a new template with the manager
+func (tm *TemplateManager) RegisterTemplate(tmpl *PromptTemplate) error {
+	if tmpl.ID == "" {
+		return fmt.Errorf("template ID cannot be empty")
+	}
+
+	if tmpl.Template == "" {
+		return fmt.Errorf("template content cannot be empty")
+	}
+
+	// Compile the template to check for syntax errors
+	compiled, err := template.New(tmpl.ID).Parse(tmpl.Template)
+	if err != nil {
+		return fmt.Errorf("failed to compile template %s: %w", tmpl.ID, err)
+	}
+
+	tm.templates[tmpl.ID] = tmpl
+	tm.compiled[tmpl.ID] = compiled
+
+	return nil
+}
+
+// GetTemplate retrieves a template by ID
+func (tm *TemplateManager) GetTemplate(id string) (*PromptTemplate, bool) {
+	tmpl, exists := tm.templates[id]
+	return tmpl, exists
+}
+
+// ListTemplates returns all registered template IDs
+func (tm *TemplateManager) ListTemplates() []string {
+	ids := make([]string, 0, len(tm.templates))
+	for id := range tm.templates {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// ExecuteTemplate executes a template with the given data
+func (tm *TemplateManager) ExecuteTemplate(id string, data interface{}) (string, error) {
+	compiled, exists := tm.compiled[id]
+	if !exists {
+		return "", fmt.Errorf("template %s not found", id)
+	}
+
+	var buf bytes.Buffer
+	if err := compiled.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template %s: %w", id, err)
+	}
+
+	return strings.TrimSpace(buf.String()), nil
+}
+
+// TemplateData represents the data structure for template execution
+type TemplateData struct {
+	Transcription string              `json:"transcription"`
+	Confidence    float32             `json:"confidence"`
+	Timestamp     time.Time           `json:"timestamp"`
+	MatchState    *context.MatchState `json:"match_state,omitempty"`
+	Context       map[string]string   `json:"context,omitempty"`
+	AudioMetrics  *AudioMetrics       `json:"audio_metrics,omitempty"`
+	PreviousCalls []string            `json:"previous_calls,omitempty"`
+}
+
+// AudioMetrics represents audio quality metrics from the speech system
+type AudioMetrics struct {
+	Volume       float32 `json:"volume"`
+	Clarity      float32 `json:"clarity"`
+	NoiseLevel   float32 `json:"noise_level"`
+	VoicePresent bool    `json:"voice_present"`
+}
+
+// ValidateTemplateData validates template data for completeness
+func ValidateTemplateData(data *TemplateData) error {
+	if data == nil {
+		return fmt.Errorf("template data cannot be nil")
+	}
+
+	if data.Transcription == "" {
+		return fmt.Errorf("transcription text is required")
+	}
+
+	if data.Confidence < 0 || data.Confidence > 1 {
+		return fmt.Errorf("confidence must be between 0 and 1, got %f", data.Confidence)
+	}
+
+	return nil
+}
+
+// DefaultTemplateManager TemplateRegistry provides a global registry for templates
+var DefaultTemplateManager = NewTemplateManager()
+
+// RegisterDefaultTemplate registers a template with the default manager
+func RegisterDefaultTemplate(tmpl *PromptTemplate) error {
+	return DefaultTemplateManager.RegisterTemplate(tmpl)
+}
+
+// GetDefaultTemplate retrieves a template from the default manager
+func GetDefaultTemplate(id string) (*PromptTemplate, bool) {
+	return DefaultTemplateManager.GetTemplate(id)
+}
+
+// ExecuteDefaultTemplate executes a template using the default manager
+func ExecuteDefaultTemplate(id string, data interface{}) (string, error) {
+	return DefaultTemplateManager.ExecuteTemplate(id, data)
+}
+</file>
+
+<file path="templates/hema_test.go">
+package templates
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/context"
+)
+
+func TestHEMATemplates_Registration(t *testing.T) {
+	// Test that all HEMA templates are registered during init
+	expectedTemplates := []string{
+		"point_scored",
+		"double_hit",
+		"no_point",
+		"afterblow",
+		"halt",
+		"card_warning",
+		"match_end",
+		"technique_highlight",
+		"director_decision",
+		"grappling_situation",
+	}
+
+	for _, templateID := range expectedTemplates {
+		template, exists := GetDefaultTemplate(templateID)
+		assert.True(t, exists, "Template %s should be registered", templateID)
+		assert.Equal(t, templateID, template.ID)
+		assert.NotEmpty(t, template.Name)
+		assert.NotEmpty(t, template.Template)
+		assert.NotNil(t, template.Metadata)
+	}
+}
+
+func TestHEMATemplates_Execution(t *testing.T) {
+	tests := []struct {
+		name         string
+		templateID   string
+		templateData *TemplateData
+		shouldWork   bool
+		contains     []string // Expected strings in output
+	}{
+		{
+			name:       "point_scored_basic",
+			templateID: "point_scored",
+			templateData: &TemplateData{
+				Transcription: "Point left",
+				MatchState: &context.MatchState{
+					CurrentScore: "2-1",
+					LastScorer:   "left",
+				},
+			},
+			shouldWork: true,
+			contains:   []string{"Point left", "2-1"},
+		},
+		{
+			name:       "double_hit",
+			templateID: "double_hit",
+			templateData: &TemplateData{
+				Transcription: "Double hit no point",
+				MatchState: &context.MatchState{
+					ScoreRed:  2,
+					ScoreBlue: 1,
+				},
+			},
+			shouldWork: true,
+			contains:   []string{"Double hit no point", "2-1"},
+		},
+		{
+			name:       "match_end_with_fencers",
+			templateID: "match_end",
+			templateData: &TemplateData{
+				Transcription: "Match complete",
+				MatchState: &context.MatchState{
+					ScoreRed:  5,
+					ScoreBlue: 3,
+				},
+			},
+			shouldWork: true,
+			contains:   []string{"Match complete", "5-3", "Alice"},
+		},
+		{
+			name:       "technique_highlight_with_style",
+			templateID: "technique_highlight",
+			templateData: &TemplateData{
+				Transcription: "Beautiful thrust to the chest",
+				Context:       map[string]string{"technique": "thrust"},
+				MatchState:    &context.MatchState{LastScorer: "left"},
+			},
+			shouldWork: true,
+			contains:   []string{"Beautiful thrust", "thrust", "aggressive"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ExecuteDefaultTemplate(tt.templateID, tt.templateData)
+
+			if tt.shouldWork {
+				assert.NoError(t, err)
+				assert.NotEmpty(t, result)
+
+				for _, expectedString := range tt.contains {
+					assert.Contains(t, result, expectedString,
+						"Expected '%s' to contain '%s'", result, expectedString)
+				}
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
+func TestTemplateSelector_SelectTemplate(t *testing.T) {
+	selector := NewTemplateSelector()
+
+	tests := []struct {
+		name          string
+		transcription string
+		matchState    *context.MatchState
+		expectedID    string
+	}{
+		{
+			name:          "point_scored_detection",
+			transcription: "Point left clean hit",
+			matchState:    &context.MatchState{},
+			expectedID:    "point_scored",
+		},
+		{
+			name:          "double_hit_detection",
+			transcription: "Double hit both fencers",
+			matchState:    &context.MatchState{},
+			expectedID:    "double_hit",
+		},
+		{
+			name:          "halt_detection",
+			transcription: "Halt stop the action",
+			matchState:    &context.MatchState{},
+			expectedID:    "halt",
+		},
+		{
+			name:          "match_end_high_score",
+			transcription: "Match is finished",
+			matchState: &context.MatchState{
+				ScoreRed:  5,
+				ScoreBlue: 2,
+			},
+			expectedID: "match_end",
+		},
+		{
+			name:          "afterblow_detection",
+			transcription: "Afterblow from the right",
+			matchState:    &context.MatchState{},
+			expectedID:    "afterblow",
+		},
+		{
+			name:          "card_warning_detection",
+			transcription: "Yellow card for the left fencer",
+			matchState:    &context.MatchState{},
+			expectedID:    "card_warning",
+		},
+		{
+			name:          "grappling_detection",
+			transcription: "Grapple situation break them up",
+			matchState:    &context.MatchState{},
+			expectedID:    "grappling_situation",
+		},
+		{
+			name:          "no_clear_match_uses_default",
+			transcription: "Unclear situation",
+			matchState:    &context.MatchState{},
+			expectedID:    "point_scored", // Default
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selected := selector.SelectTemplate(tt.transcription, tt.matchState)
+			assert.Equal(t, tt.expectedID, selected)
+		})
+	}
+}
+
+func TestGetTemplatesByCategory(t *testing.T) {
+	tests := []struct {
+		category      string
+		expectedCount int
+		expectedIDs   []string
+	}{
+		{
+			category:      "scoring",
+			expectedCount: 1,
+			expectedIDs:   []string{"point_scored"},
+		},
+		{
+			category:      "rules",
+			expectedCount: 2,
+			expectedIDs:   []string{"double_hit", "afterblow"},
+		},
+		{
+			category:      "discipline",
+			expectedCount: 1,
+			expectedIDs:   []string{"card_warning"},
+		},
+		{
+			category:      "nonexistent",
+			expectedCount: 0,
+			expectedIDs:   []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.category, func(t *testing.T) {
+			templates := GetTemplatesByCategory(tt.category)
+			assert.Len(t, templates, tt.expectedCount)
+
+			for _, expectedID := range tt.expectedIDs {
+				assert.Contains(t, templates, expectedID)
+			}
+		})
+	}
+}
+
+func TestGetTemplatesByPriority(t *testing.T) {
+	tests := []struct {
+		priority         string
+		expectedContains []string
+		shouldHaveItems  bool
+	}{
+		{
+			priority:         "high",
+			expectedContains: []string{"point_scored", "double_hit", "afterblow", "card_warning", "match_end"},
+			shouldHaveItems:  true,
+		},
+		{
+			priority:         "medium",
+			expectedContains: []string{"technique_highlight", "director_decision", "grappling_situation"},
+			shouldHaveItems:  true,
+		},
+		{
+			priority:         "low",
+			expectedContains: []string{"halt"},
+			shouldHaveItems:  true,
+		},
+		{
+			priority:        "nonexistent",
+			shouldHaveItems: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.priority, func(t *testing.T) {
+			templates := GetTemplatesByPriority(tt.priority)
+
+			if tt.shouldHaveItems {
+				assert.NotEmpty(t, templates)
+				for _, expectedID := range tt.expectedContains {
+					assert.Contains(t, templates, expectedID)
+				}
+			} else {
+				assert.Empty(t, templates)
+			}
+		})
+	}
+}
+
+func TestTemplateMetadata(t *testing.T) {
+	// Test that all templates have required metadata
+	for templateID, template := range HEMATemplates {
+		t.Run(templateID, func(t *testing.T) {
+			assert.NotNil(t, template.Metadata, "Template %s should have metadata", templateID)
+
+			// Check required metadata fields
+			assert.Contains(t, template.Metadata, "category", "Template %s should have category", templateID)
+			assert.Contains(t, template.Metadata, "priority", "Template %s should have priority", templateID)
+			assert.Contains(t, template.Metadata, "target_tone", "Template %s should have target_tone", templateID)
+
+			// Validate metadata values
+			category := template.Metadata["category"]
+			assert.Contains(t, []string{"scoring", "rules", "neutral", "discipline", "conclusion", "technique", "official", "grappling", "control"},
+				category, "Invalid category for template %s", templateID)
+
+			priority := template.Metadata["priority"]
+			assert.Contains(t, []string{"high", "medium", "low"},
+				priority, "Invalid priority for template %s", templateID)
+
+			tone := template.Metadata["target_tone"]
+			assert.Contains(t, []string{"exciting", "educational", "analytical", "neutral", "serious", "celebratory", "appreciative", "informative", "tactical"},
+				tone, "Invalid target_tone for template %s", templateID)
+		})
+	}
+}
+
+func TestTemplateVariables(t *testing.T) {
+	// Test that all templates have their required variables documented
+	for templateID, template := range HEMATemplates {
+		t.Run(templateID, func(t *testing.T) {
+			assert.NotEmpty(t, template.Variables, "Template %s should declare its variables", templateID)
+
+			// Basic sanity check - all templates should use Transcription
+			assert.Contains(t, template.Variables, "Transcription",
+				"Template %s should use Transcription variable", templateID)
+		})
+	}
+}
+
+func TestTemplateTokenLimits(t *testing.T) {
+	// Test that all templates have reasonable token limits
+	for templateID, template := range HEMATemplates {
+		t.Run(templateID, func(t *testing.T) {
+			assert.Greater(t, template.MaxTokens, 0, "Template %s should have positive MaxTokens", templateID)
+			assert.LessOrEqual(t, template.MaxTokens, 200, "Template %s MaxTokens should be reasonable", templateID)
+		})
+	}
+}
+
+func TestTemplateTemperature(t *testing.T) {
+	// Test that all templates have reasonable temperature settings
+	for templateID, template := range HEMATemplates {
+		t.Run(templateID, func(t *testing.T) {
+			assert.GreaterOrEqual(t, template.Temperature, float32(0.0), "Template %s temperature should be >= 0", templateID)
+			assert.LessOrEqual(t, template.Temperature, float32(1.0), "Template %s temperature should be <= 1", templateID)
+		})
+	}
+}
+
+// Benchmark template selection
+func BenchmarkTemplateSelector_SelectTemplate(b *testing.B) {
+	selector := NewTemplateSelector()
+	matchState := &context.MatchState{
+		ScoreRed:  2,
+		ScoreBlue: 1,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = selector.SelectTemplate("Point left clean hit", matchState)
+	}
+}
+
+// Benchmark template execution
+func BenchmarkHEMATemplate_Execution(b *testing.B) {
+	templateData := &TemplateData{
+		Transcription: "Point left",
+		MatchState: &context.MatchState{
+			CurrentScore: "2-1",
+			LastScorer:   "left",
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ExecuteDefaultTemplate("point_scored", templateData)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+</file>
+
+<file path="templates/hema.go">
+package templates
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/your-org/hema-replay-system/pkg/commentary/context"
+)
+
+// HEMATemplates contains all HEMA-specific prompt templates
+var HEMATemplates = map[string]*PromptTemplate{
+	"point_scored": {
+		ID:   "point_scored",
+		Name: "Point Scored Commentary",
+		Template: `Convert this HEMA judge call into engaging TV commentary (max 2 sentences):
+Judge call: "{{.Transcription}}"
+Score: {{.MatchState.CurrentScore}}
+{{if .MatchState.LastScorer}}Last scorer: {{.MatchState.LastScorer}}{{end}}
+Commentary:`,
+		Variables:   []string{"Transcription", "MatchState.CurrentScore", "MatchState.LastScorer"},
+		MaxTokens:   50,
+		Temperature: 0.7,
+		Metadata: map[string]string{
+			"category":    "scoring",
+			"priority":    "high",
+			"target_tone": "exciting",
+		},
+	},
+	"double_hit": {
+		ID:   "double_hit",
+		Name: "Double Hit Explanation",
+		Template: `Explain this double hit situation for TV viewers in simple terms:
+Judge call: "{{.Transcription}}"
+Match situation: {{.MatchState.ScoreRed}}-{{.MatchState.ScoreBlue}}
+Brief explanation:`,
+		Variables:   []string{"Transcription", "MatchState.ScoreRed", "MatchState.ScoreBlue"},
+		MaxTokens:   60,
+		Temperature: 0.6,
+		Metadata: map[string]string{
+			"category":    "rules",
+			"priority":    "high",
+			"target_tone": "educational",
+		},
+	},
+	"no_point": {
+		ID:   "no_point",
+		Name: "No Point Called",
+		Template: `Comment on this no-point situation in HEMA:
+Judge call: "{{.Transcription}}"
+Current action: {{.MatchState.LastAction}}
+Commentary:`,
+		Variables:   []string{"Transcription", "MatchState.LastAction"},
+		MaxTokens:   40,
+		Temperature: 0.5,
+		Metadata: map[string]string{
+			"category":    "neutral",
+			"priority":    "medium",
+			"target_tone": "analytical",
+		},
+	},
+	"afterblow": {
+		ID:   "afterblow",
+		Name: "Afterblow Situation",
+		Template: `Explain this afterblow call for viewers:
+Judge call: "{{.Transcription}}"
+This means: {{if eq .MatchState.LastScorer "left"}}the left fencer scored but took a counter-attack{{else if eq .MatchState.LastScorer "right"}}the right fencer scored but took a counter-attack{{else}}both fencers hit in rapid succession{{end}}
+Commentary:`,
+		Variables:   []string{"Transcription", "MatchState.LastScorer"},
+		MaxTokens:   55,
+		Temperature: 0.6,
+		Metadata: map[string]string{
+			"category":    "rules",
+			"priority":    "high",
+			"target_tone": "educational",
+		},
+	},
+	"halt": {
+		ID:   "halt",
+		Name: "Match Halt",
+		Template: `Brief comment on this match interruption:
+Judge call: "{{.Transcription}}"
+{{if .Context.reason}}Reason: {{.Context.reason}}{{end}}
+Commentary:`,
+		Variables:   []string{"Transcription", "Context.reason"},
+		MaxTokens:   30,
+		Temperature: 0.4,
+		Metadata: map[string]string{
+			"category":    "control",
+			"priority":    "low",
+			"target_tone": "neutral",
+		},
+	},
+	"card_warning": {
+		ID:   "card_warning",
+		Name: "Card or Warning",
+		Template: `Explain this disciplinary action:
+Judge call: "{{.Transcription}}"
+Match context: {{.MatchState.CurrentScore}}, Period {{.MatchState.Period}}
+Commentary:`,
+		Variables:   []string{"Transcription", "MatchState.CurrentScore", "MatchState.Period"},
+		MaxTokens:   45,
+		Temperature: 0.5,
+		Metadata: map[string]string{
+			"category":    "discipline",
+			"priority":    "high",
+			"target_tone": "serious",
+		},
+	},
+	"match_end": {
+		ID:   "match_end",
+		Name: "Match Conclusion",
+		Template: `Provide closing commentary for this match result:
+Judge call: "{{.Transcription}}"
+Final score: {{.MatchState.ScoreRed}}-{{.MatchState.ScoreBlue}}
+{{if gt .MatchState.ScoreRed .MatchState.ScoreBlue}}Left fencer takes the victory{{else if gt .MatchState.ScoreBlue .MatchState.ScoreRed}}Right fencer claims the win{{else}}Match ends in a tie{{end}}
+Closing commentary:`,
+		Variables:   []string{"Transcription", "MatchState.ScoreRed", "MatchState.ScoreBlue"},
+		MaxTokens:   70,
+		Temperature: 0.8,
+		Metadata: map[string]string{
+			"category":    "conclusion",
+			"priority":    "high",
+			"target_tone": "celebratory",
+		},
+	},
+	"technique_highlight": {
+		ID:   "technique_highlight",
+		Name: "Technique Highlight",
+		Template: `Comment on this impressive technique:
+Judge call: "{{.Transcription}}"
+{{if .Context.technique}}Technique used: {{.Context.technique}}{{end}}
+{{if eq .MatchState.LastScorer "left"}}Left fencer executed well{{else if eq .MatchState.LastScorer "right"}}Right fencer shows good form{{else}}Excellent technical display{{end}}
+Commentary:`,
+		Variables:   []string{"Transcription", "Context.technique", "MatchState.LastScorer"},
+		MaxTokens:   55,
+		Temperature: 0.8,
+		Metadata: map[string]string{
+			"category":    "technique",
+			"priority":    "medium",
+			"target_tone": "appreciative",
+		},
+	},
+	"director_decision": {
+		ID:   "director_decision",
+		Name: "Director's Decision",
+		Template: `Explain this director's ruling:
+Judge call: "{{.Transcription}}"
+Match situation: Period {{.MatchState.Period}}, {{.MatchState.ScoreRed}}-{{.MatchState.ScoreBlue}}
+Explanation:`,
+		Variables:   []string{"Transcription", "MatchState.Period", "MatchState.ScoreRed", "MatchState.ScoreBlue"},
+		MaxTokens:   50,
+		Temperature: 0.5,
+		Metadata: map[string]string{
+			"category":    "official",
+			"priority":    "medium",
+			"target_tone": "informative",
+		},
+	},
+	"grappling_situation": {
+		ID:   "grappling_situation",
+		Name: "Grappling Commentary",
+		Template: `Comment on this grappling exchange:
+Judge call: "{{.Transcription}}"
+{{if .Context.weapon}}Weapon: {{.Context.weapon}}{{end}}
+Commentary:`,
+		Variables:   []string{"Transcription", "Context.weapon"},
+		MaxTokens:   45,
+		Temperature: 0.7,
+		Metadata: map[string]string{
+			"category":    "grappling",
+			"priority":    "medium",
+			"target_tone": "tactical",
+		},
+	},
+}
+
+// TemplateSelector helps select the appropriate template based on context
+type TemplateSelector struct {
+	keywordMap      map[string][]string
+	defaultTemplate string
+}
+
+// NewTemplateSelector creates a new template selector
+func NewTemplateSelector() *TemplateSelector {
+	return &TemplateSelector{
+		keywordMap: map[string][]string{
+			"point_scored":        {"point", "touch", "hit", "score", "left", "right"},
+			"double_hit":          {"double", "both", "simultaneous", "together"},
+			"no_point":            {"no point", "nothing", "miss", "parry"},
+			"afterblow":           {"afterblow", "after", "counter", "riposte"},
+			"halt":                {"halt", "stop", "break", "pause"},
+			"card_warning":        {"card", "warning", "yellow", "red", "penalty"},
+			"match_end":           {"match", "bout", "end", "finish", "victory", "defeat"},
+			"technique_highlight": {"thrust", "cut", "slice", "pommel", "crossguard", "bind"},
+			"director_decision":   {"director", "decision", "ruling", "call"},
+			"grappling_situation": {"grapple", "grab", "wrestling", "close", "clinch"},
+		},
+		defaultTemplate: "point_scored",
+	}
+}
+
+// SelectTemplate selects the most appropriate template based on transcription content
+func (ts *TemplateSelector) SelectTemplate(transcription string, matchState *context.MatchState) string {
+	transcriptionLower := strings.ToLower(transcription)
+
+	// Score each template based on keyword matches
+	scores := make(map[string]int)
+
+	for templateID, keywords := range ts.keywordMap {
+		score := 0
+		for _, keyword := range keywords {
+			if strings.Contains(transcriptionLower, strings.ToLower(keyword)) {
+				score++
+			}
+		}
+		scores[templateID] = score
+	}
+
+	// Find the template with the highest score
+	maxScore := 0
+	selectedTemplate := ts.defaultTemplate
+
+	for templateID, score := range scores {
+		if score > maxScore {
+			maxScore = score
+			selectedTemplate = templateID
+		}
+	}
+
+	// Special logic based on match state
+	if matchState != nil {
+		// If it's the end of the match (high score), prefer match_end
+		if matchState.ScoreRed >= 5 || matchState.ScoreBlue >= 5 {
+			if strings.Contains(transcriptionLower, "match") || strings.Contains(transcriptionLower, "end") {
+				selectedTemplate = "match_end"
+			}
+		}
+
+		// If we detect specific situations, override
+		if strings.Contains(transcriptionLower, "double") {
+			selectedTemplate = "double_hit"
+		} else if strings.Contains(transcriptionLower, "halt") {
+			selectedTemplate = "halt"
+		}
+	}
+
+	return selectedTemplate
+}
+
+// GetTemplatesByCategory returns templates filtered by category
+func GetTemplatesByCategory(category string) map[string]*PromptTemplate {
+	result := make(map[string]*PromptTemplate)
+
+	for id, tmpl := range HEMATemplates {
+		if tmpl.Metadata != nil && tmpl.Metadata["category"] == category {
+			result[id] = tmpl
+		}
+	}
+
+	return result
+}
+
+// GetTemplatesByPriority returns templates filtered by priority
+func GetTemplatesByPriority(priority string) map[string]*PromptTemplate {
+	result := make(map[string]*PromptTemplate)
+
+	for id, tmpl := range HEMATemplates {
+		if tmpl.Metadata != nil && tmpl.Metadata["priority"] == priority {
+			result[id] = tmpl
+		}
+	}
+
+	return result
+}
+
+// RegisterHEMATemplates registers all HEMA templates with the default template manager
+func RegisterHEMATemplates() error {
+	for _, tmpl := range HEMATemplates {
+		if err := RegisterDefaultTemplate(tmpl); err != nil {
+			return fmt.Errorf("failed to register template %s: %w", tmpl.ID, err)
+		}
+	}
+	return nil
+}
+
+// init automatically registers HEMA templates when the package is imported
+func init() {
+	// Register all HEMA templates with the default template manager
+	if err := RegisterHEMATemplates(); err != nil {
+		// In a production system, you might want to handle this differently
+		panic(fmt.Sprintf("Failed to initialize HEMA templates: %v", err))
+	}
+}
+</file>
+
+<file path="types/commentary.go">
+package types
+
+import (
+	"time"
+)
+
+// Commentary represents generated commentary for a HEMA match event
+type Commentary struct {
+	ID          string             `json:"id"`
+	Text        string             `json:"text"`
+	DisplayText string             `json:"display_text"` // Formatted for OBS overlay
+	Source      string             `json:"source"`       // "llm", "cache", "fallback"
+	Confidence  float32            `json:"confidence"`
+	Timestamp   time.Time          `json:"timestamp"`
+	Metadata    CommentaryMetadata `json:"metadata"`
+
+	// Source information
+	InputText       string  `json:"input_text"`
+	InputConfidence float32 `json:"input_confidence"`
+	TemplateID      string  `json:"template_id"`
+	PromptUsed      string  `json:"prompt_used,omitempty"`
+
+	// Performance metrics
+	GenerationLatency time.Duration `json:"generation_latency"`
+	CacheHit          bool          `json:"cache_hit"`
+
+	// Quality metrics
+	QualityScore     float32 `json:"quality_score"`
+	RelevanceScore   float32 `json:"relevance_score"`
+	ValidationPassed bool    `json:"validation_passed"`
+}
+
+// CommentaryMetadata contains additional metadata about the commentary
+type CommentaryMetadata struct {
+	Category        string            `json:"category"`    // "scoring", "rules", "technique", etc.
+	Priority        string            `json:"priority"`    // "high", "medium", "low"
+	TargetTone      string            `json:"target_tone"` // "exciting", "educational", "neutral"
+	MatchContext    *MatchContext     `json:"match_context,omitempty"`
+	AudioQuality    *AudioQuality     `json:"audio_quality,omitempty"`
+	ProcessingSteps []string          `json:"processing_steps"` // Track what steps were used
+	Fallbacks       []string          `json:"fallbacks"`        // Track fallback strategies used
+	ExtraData       map[string]string `json:"extra_data,omitempty"`
+}
+
+// MatchContext provides context about the current match state
+type MatchContext struct {
+	ScoreRed      int           `json:"score_red"`
+	ScoreBlue     int           `json:"score_blue"`
+	Period        int           `json:"period"`
+	TimeRemaining time.Duration `json:"time_remaining"`
+	LastScorer    string        `json:"last_scorer"` // "red", "blue", or ""
+	LastAction    string        `json:"last_action"`
+	RecentActions []string      `json:"recent_actions"`
+	MatchPhase    string        `json:"match_phase"` // "opening", "middle", "closing"
+	Intensity     string        `json:"intensity"`   // "low", "medium", "high"
+}
+
+// AudioQuality contains information about the audio input quality
+type AudioQuality struct {
+	SignalToNoise   float32 `json:"signal_to_noise"`
+	Clarity         float32 `json:"clarity"`
+	VoiceDetection  bool    `json:"voice_detection"`
+	BackgroundNoise float32 `json:"background_noise"`
+	Distortion      float32 `json:"distortion"`
+}
+
+// TranscriptionInput represents the input for commentary generation
+type TranscriptionInput struct {
+	Text         string            `json:"text"`
+	Confidence   float32           `json:"confidence"`
+	Timestamp    time.Time         `json:"timestamp"`
+	AudioMetrics *AudioQuality     `json:"audio_metrics,omitempty"`
+	Context      *MatchContext     `json:"context,omitempty"`
+	ExtraData    map[string]string `json:"extra_data,omitempty"`
+}
+
+// CommentaryRequest represents a request for commentary generation
+type CommentaryRequest struct {
+	Input       TranscriptionInput `json:"input"`
+	TemplateID  string             `json:"template_id,omitempty"`  // Override template selection
+	MaxLatency  time.Duration      `json:"max_latency,omitempty"`  // Maximum acceptable latency
+	Quality     QualityLevel       `json:"quality,omitempty"`      // Quality vs speed preference
+	CachePolicy CachePolicy        `json:"cache_policy,omitempty"` // Cache behavior preference
+}
+
+// QualityLevel defines the quality preference for generation
+type QualityLevel string
+
+const (
+	QualityLevelFast     QualityLevel = "fast"     // Prefer speed, allow fallbacks
+	QualityLevelBalanced QualityLevel = "balanced" // Balance speed and quality
+	QualityLevelHigh     QualityLevel = "high"     // Prefer quality, longer latency OK
+)
+
+// CachePolicy defines cache behavior preference
+type CachePolicy string
+
+const (
+	CachePolicyDefault  CachePolicy = "default"  // Use normal cache behavior
+	CachePolicyForce    CachePolicy = "force"    // Prefer cached results
+	CachePolicyBypass   CachePolicy = "bypass"   // Force generation, update cache
+	CachePolicyDisabled CachePolicy = "disabled" // No cache usage
+)
+
+// CommentaryResponse represents the response from commentary generation
+type CommentaryResponse struct {
+	Commentary *Commentary   `json:"commentary"`
+	Success    bool          `json:"success"`
+	Error      string        `json:"error,omitempty"`
+	Latency    time.Duration `json:"latency"`
+	Timestamp  time.Time     `json:"timestamp"`
+
+	// Debug information
+	CacheStats    *CacheStats `json:"cache_stats,omitempty"`
+	ProcessingLog []LogEntry  `json:"processing_log,omitempty"`
+}
+
+// CacheStats provides information about cache usage
+type CacheStats struct {
+	L1Hit           bool          `json:"l1_hit"`
+	L2Hit           bool          `json:"l2_hit"`
+	L3Hit           bool          `json:"l3_hit"`
+	CacheKey        string        `json:"cache_key"`
+	LookupTime      time.Duration `json:"lookup_time"`
+	SimilarityScore float32       `json:"similarity_score,omitempty"`
+}
+
+// LogEntry represents a processing step in the commentary generation
+type LogEntry struct {
+	Step      string        `json:"step"`
+	Timestamp time.Time     `json:"timestamp"`
+	Duration  time.Duration `json:"duration,omitempty"`
+	Success   bool          `json:"success"`
+	Message   string        `json:"message,omitempty"`
+	Data      interface{}   `json:"data,omitempty"`
+}
+
+// GenerationMetrics contains metrics about the commentary generation process
+type GenerationMetrics struct {
+	// Request metrics
+	TotalRequests  uint64 `json:"total_requests"`
+	SuccessfulReqs uint64 `json:"successful_requests"`
+	FailedReqs     uint64 `json:"failed_requests"`
+
+	// Latency metrics
+	AvgLatency time.Duration `json:"avg_latency"`
+	P50Latency time.Duration `json:"p50_latency"`
+	P95Latency time.Duration `json:"p95_latency"`
+	P99Latency time.Duration `json:"p99_latency"`
+	MaxLatency time.Duration `json:"max_latency"`
+
+	// Source distribution
+	LLMGenerated uint64 `json:"llm_generated"`
+	CacheHits    uint64 `json:"cache_hits"`
+	FallbackUsed uint64 `json:"fallback_used"`
+
+	// Quality metrics
+	AvgQualityScore    float32 `json:"avg_quality_score"`
+	AvgRelevanceScore  float32 `json:"avg_relevance_score"`
+	ValidationFailures uint64  `json:"validation_failures"`
+
+	// Cache metrics
+	CacheHitRate  float32 `json:"cache_hit_rate"`
+	CacheMissRate float32 `json:"cache_miss_rate"`
+
+	// Performance metrics
+	TokensPerSecond float32 `json:"tokens_per_second"`
+	ActiveRequests  int     `json:"active_requests"`
+
+	// Error metrics
+	TimeoutErrors    uint64 `json:"timeout_errors"`
+	ValidationErrors uint64 `json:"validation_errors"`
+	LLMErrors        uint64 `json:"llm_errors"`
+	CacheErrors      uint64 `json:"cache_errors"`
+
+	// Resource metrics
+	MemoryUsage uint64  `json:"memory_usage_bytes"`
+	CPUUsage    float32 `json:"cpu_usage_percent"`
+
+	// Timestamp
+	LastUpdated     time.Time `json:"last_updated"`
+	CollectionStart time.Time `json:"collection_start"`
+}
+
+// CommentaryConfig represents configuration for the commentary system
+type CommentaryConfig struct {
+	// Generation settings
+	DefaultTemplate    string        `mapstructure:"default_template"`
+	MaxLatency         time.Duration `mapstructure:"max_latency"`
+	DefaultQuality     QualityLevel  `mapstructure:"default_quality"`
+	ConcurrentRequests int           `mapstructure:"concurrent_requests"`
+
+	// Quality settings
+	MinConfidence      float32 `mapstructure:"min_confidence"`
+	QualityThreshold   float32 `mapstructure:"quality_threshold"`
+	RelevanceThreshold float32 `mapstructure:"relevance_threshold"`
+
+	// Fallback settings
+	EnableFallback    bool    `mapstructure:"enable_fallback"`
+	FallbackThreshold float32 `mapstructure:"fallback_threshold"`
+	MaxRetries        int     `mapstructure:"max_retries"`
+
+	// Output settings
+	MaxOutputLength       int  `mapstructure:"max_output_length"`
+	MinOutputLength       int  `mapstructure:"min_output_length"`
+	EnableProfanityFilter bool `mapstructure:"enable_profanity_filter"`
+
+	// Cache settings
+	EnableCache        bool        `mapstructure:"enable_cache"`
+	DefaultCachePolicy CachePolicy `mapstructure:"default_cache_policy"`
+
+	// Monitoring settings
+	EnableMetrics bool   `mapstructure:"enable_metrics"`
+	EnableLogging bool   `mapstructure:"enable_logging"`
+	LogLevel      string `mapstructure:"log_level"`
+}
+
+// DefaultCommentaryConfig returns default configuration for the commentary system
+func DefaultCommentaryConfig() *CommentaryConfig {
+	return &CommentaryConfig{
+		DefaultTemplate:       "point_scored",
+		MaxLatency:            2 * time.Second,
+		DefaultQuality:        QualityLevelBalanced,
+		ConcurrentRequests:    3,
+		MinConfidence:         0.6,
+		QualityThreshold:      0.3,
+		RelevanceThreshold:    0.25,
+		EnableFallback:        true,
+		FallbackThreshold:     0.6,
+		MaxRetries:            2,
+		MaxOutputLength:       200,
+		MinOutputLength:       10,
+		EnableProfanityFilter: true,
+		EnableCache:           true,
+		DefaultCachePolicy:    CachePolicyDefault,
+		EnableMetrics:         true,
+		EnableLogging:         true,
+		LogLevel:              "info",
+	}
+}
+</file>
+
+</files>

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/your-org/hema-replay-system/pkg/audio/types"
 	commentaryTypes "github.com/your-org/hema-replay-system/pkg/commentary/types"
-	llmTypes "github.com/your-org/hema-replay-system/pkg/llm/types"
+
 	speechTypes "github.com/your-org/hema-replay-system/pkg/speech/types"
 )
 
@@ -110,41 +110,18 @@ logging:
 						MetalOptimization: true,
 					},
 				},
-				LLM: llmTypes.LLMConfig{
-					ModelPath:     "./models/qwen2.5-3b-instruct-q4_0.gguf",
-					ContextSize:   4096,
-					BatchSize:     512,
-					Threads:       4,
-					Temperature:   0.7,
-					TopP:          0.9,
-					TopK:          40,
-					RepeatPenalty: 1.1,
-					Seed:          -1,
-					UseGPU:        false,
-					GPULayers:     35,
-					UseMMap:       false,
-					UseMlock:      false,
-					EnableLowVRAM: false,
-				},
+
 				Commentary: commentaryTypes.CommentaryConfig{
-					DefaultTemplate:       "point_scored",
-					MaxLatency:            2 * time.Second,
-					DefaultQuality:        "balanced",
-					ConcurrentRequests:    3,
-					MinConfidence:         0.6,
-					QualityThreshold:      0.7,
-					RelevanceThreshold:    0.75,
-					EnableFallback:        true,
-					FallbackThreshold:     0.6,
-					MaxRetries:            2,
-					MaxOutputLength:       200,
-					MinOutputLength:       10,
-					EnableProfanityFilter: true,
-					EnableCache:           true,
-					DefaultCachePolicy:    "default",
-					EnableMetrics:         true,
-					EnableLogging:         true,
-					LogLevel:              "info",
+					MaxLatency:         2 * time.Second,
+					ConcurrentRequests: 3,
+					MinConfidence:      0.6,
+					QualityThreshold:   0.7,
+					RelevanceThreshold: 0.75,
+					MaxOutputLength:    200,
+					MinOutputLength:    10,
+					EnableMetrics:      true,
+					EnableLogging:      true,
+					LogLevel:           "info",
 				},
 				Logging: LoggingConfig{
 					Level:  "debug",
@@ -239,11 +216,7 @@ func TestValidateConfig(t *testing.T) {
 						TimeoutDuration: 30 * time.Second,
 					},
 				},
-				LLM: llmTypes.LLMConfig{
-					ModelPath:   "./models/qwen2.5-3b-instruct-q4_0.gguf",
-					ContextSize: 4096,
-					Threads:     4,
-				},
+
 				Commentary: commentaryTypes.CommentaryConfig{
 					MaxLatency:         2 * time.Second,
 					ConcurrentRequests: 3,

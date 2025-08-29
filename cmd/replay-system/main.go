@@ -24,10 +24,7 @@ import (
 	"github.com/your-org/hema-replay-system/pkg/audio/debug"
 	"github.com/your-org/hema-replay-system/pkg/audio/processing"
 	audioTypes "github.com/your-org/hema-replay-system/pkg/audio/types"
-	commentaryContext "github.com/your-org/hema-replay-system/pkg/commentary/context"
 	commentaryEngine "github.com/your-org/hema-replay-system/pkg/commentary/engine"
-	commentaryPrompt "github.com/your-org/hema-replay-system/pkg/commentary/prompt"
-	commentaryTemplates "github.com/your-org/hema-replay-system/pkg/commentary/templates"
 	commentaryTypes "github.com/your-org/hema-replay-system/pkg/commentary/types"
 	llmEngine "github.com/your-org/hema-replay-system/pkg/llm/engine"
 	"github.com/your-org/hema-replay-system/pkg/logger"
@@ -350,7 +347,7 @@ func (a *Application) initializePipelineMode(ctx context.Context) error {
 	return nil
 }
 
-// initializeCommentarySystem initializes the commentary generation system
+// initializeCommentarySystem initializes the simplified commentary generation system
 func (a *Application) initializeCommentarySystem(ctx context.Context) error {
 	// Initialize LLM engine
 	llmEngine, err := llmEngine.NewLlmEngine(&a.config.LLMConfig, ctx, a.logger.WithComponent("llm").Logger)
@@ -359,34 +356,9 @@ func (a *Application) initializeCommentarySystem(ctx context.Context) error {
 	}
 	a.llmEngine = llmEngine
 
-	// Initialize template manager and load HEMA templates
-	templateManager := commentaryTemplates.NewTemplateManager()
-
-	// Register HEMA templates manually since the auto-registration uses the default manager
-	for _, tmpl := range commentaryTemplates.HEMATemplates {
-		if err := templateManager.RegisterTemplate(tmpl); err != nil {
-			return fmt.Errorf("failed to register template %s: %w", tmpl.ID, err)
-		}
-	}
-
-	// Initialize context manager
-	contextManager := commentaryContext.NewContextManager(a.logger.WithComponent("context").Logger)
-
-	// Initialize prompt builder
-	builderConfig := commentaryPrompt.DefaultBuilderConfig()
-	builderConfig.DefaultTemplate = "point_scored"
-
-	promptBuilder := commentaryPrompt.NewBuilder(
-		templateManager,
-		contextManager,
-		builderConfig,
-		a.logger.WithComponent("prompt").Logger,
-	)
-
-	// Initialize commentary generator
+	// Initialize commentary generator with simplified system
 	commentaryGen, err := commentaryEngine.NewCommentaryGenerator(
 		llmEngine,
-		promptBuilder,
 		&a.config.Commentary,
 		a.logger.WithComponent("commentary").Logger,
 	)
@@ -413,9 +385,7 @@ func (a *Application) processCommentaryForTranscription(ctx context.Context, tra
 			Confidence: float32(transcription.Confidence),
 			Timestamp:  time.Now(),
 		},
-		MaxLatency:  2 * time.Second, // Quick response for live commentary
-		Quality:     commentaryTypes.QualityLevelBalanced,
-		CachePolicy: commentaryTypes.CachePolicyDefault,
+		MaxLatency: 2 * time.Second, // Quick response for live commentary
 	}
 
 	// Add audio quality if available from metadata
@@ -455,9 +425,6 @@ func (a *Application) processCommentaryForTranscription(ctx context.Context, tra
 		fmt.Printf("Commentary: %s\n", response.Commentary.Text)
 		fmt.Printf("Confidence: %.2f | Generation Time: %v\n", response.Commentary.Confidence, response.Latency)
 		fmt.Printf("Source: %s\n", response.Commentary.Source)
-		if response.Commentary.TemplateID != "" {
-			fmt.Printf("Template: %s\n", response.Commentary.TemplateID)
-		}
 		fmt.Printf("========================\n")
 	}
 
