@@ -27,7 +27,7 @@ YELLOW=\033[1;33m
 RED=\033[0;31m
 NC=\033[0m # No Color
 
-.PHONY: all build build-with-debug clean test coverage deps fmt vet lint run install help run-debug run-debug-headless whisper mlx-server
+.PHONY: all build build-with-debug clean test coverage deps fmt vet lint run install help run-debug run-debug-headless whisper ollama-server
 
 all: deps fmt vet test build
 
@@ -144,9 +144,9 @@ install: build
 	@echo "$(GREEN)Installing $(BINARY_NAME)...$(NC)"
 	@cp $(BINARY_PATH) $(GOPATH)/bin/$(BINARY_NAME)
 
-mlx-server:
-	@echo "$(GREEN) Running MLX server"
-	uvx --from mlx-lm mlx_lm.server --model 'mlx-community/Qwen3-4B-Instruct-2507-8bit' --port 8080 --log-level DEBUG
+ollama-server:
+	@echo "$(GREEN) Running Ollama server"
+	ollama serve
 
 whisper:
 	@echo "$(GREEN)Building whisper$(NC)"

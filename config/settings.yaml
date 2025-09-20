@@ -75,8 +75,6 @@ speech:
     beam_size: 5
     word_timestamps: true
 
-
-
   processing:
     target_sample_rate: 16000
     segment_duration: "10s"
@@ -94,8 +92,8 @@ speech:
     metal_optimization: true
 
 llm:
-  endpoint: "http://localhost:8080"
-  model_id: "mlx-community/Qwen3-4B-Instruct-2507-8bit"
+  endpoint: "http://127.0.0.1:11434"
+  model_id: "gemma3:1b"
   timeout: "30s"
 
 commentary:
@@ -146,4 +144,4 @@ pipeline:
 
 logging:
   level: "debug"
-  format: "json"
+  format: "console"

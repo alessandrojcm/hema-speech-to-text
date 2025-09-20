@@ -3,19 +3,23 @@ package engine
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
-	"github.com/openai/openai-go/v2"
-	"github.com/openai/openai-go/v2/option"
-	"github.com/openai/openai-go/v2/packages/param"
+	"github.com/ollama/ollama/api"
 	"github.com/rs/zerolog"
 	"github.com/your-org/hema-replay-system/pkg/llm/types"
 )
 
-const systemPrompt = `You are a Historical European Martial Arts (HEMA) expert assisting on a live tournament.
+const systemPrompt = `
+<role>
+You are a Historical European Martial Arts (HEMA) expert assisting on a live tournament.
 Your task is to listen to calls made by the main judge and translate them to layman terms so the audience on the livestream can understand. 
+</role>
 
+<instructions>
 Explanations should be concise and to the point. Preferable one sentence as they will be used in the replay.
 
 This tournament is loosely based in the irish ruleset, here are the basic rules:
@@ -29,12 +33,16 @@ That is 5 points to red and 3 points to blue. The points are subtracted (5 - 3) 
 If both fencers hit the same area they get zero points.
 6. Shallow targets are to the arms, hands and the outside part of the legs. Deep targets are to the inside of the legs, the head and the torso.
 8. Fights last up to 9 exchanges or 3 mins or 20 points cap, whichever comes first.
+9. When there is a blow followed with an afterblow, and the target type is omitted (there is no shallow or deep mentioned), assume they hit the same area. 
+10. When there is a blow followed with an afterblow, and only one of the targets is mentioned, assume they hit the same area.
+11. If you cannot understand the input (for example the judge did not mention colours of the fencers), say nothing.
 
 Here are some important rules for your task:
 1. You are acting as a translator, you will not add any additional unnecessary commentaries.
 2. If you cannot understand the input (for example the judge did not mention colours of the fencers), say nothing.
 3. Your explanation needs to be as short and accurate as possible.
 4. Unless the judge specifically calls the body part that was hit, DO NOT mention it.
+</instructions>
 
 Here are some examples:
 
@@ -63,11 +71,38 @@ Judge: red shallow target, blue afterflow deep target.
 Explanation: Red hits with a shallow but blue hits right back with a deep target, so blue gets 3 points.
 </example>
 
+<example>
+Judge: blue deep red.
+Explanation: Blue hits red with a deep target, so they get 5 points.
+</example>
+
+<example>
+Judge: there was a deep target from blue followed with an afterblow from red.
+Explanation: Both fencers hit the same area, so no points.
+</example>
+
+<example>
+Judge: there was a deep target from blue followed with a shallow target from red.
+Explanation: Blue hits a deep target (5 points) and red hits a shallow target (3 points), so blue gets 2 points.
+</example>
+
+<example>
+Judge: there was a hit from blue and an afterblow from red.
+Explanation: Both fencers hit the same area, so no points.
+</example>
+
+<example>
+Judge: there was a deep hit from blue and an afterblow from red.
+Explanation: Both fencers htm the same area, so no points.
+</example>
+
+<task>
 You will output the explanation as a singular string with ONLY the judge call explanation. For example,
 if the input was: red shallow target, blue afterflow deep target. Your output will be:
 Red hits with a shallow but blue hits right back with a deep target, so blue gets 3 points.
 
 Now transcribe the judge call below
+</task>
 `
 
 // ModelEngine wraps go-llama.cpp bindings for text generation
@@ -75,7 +110,7 @@ type ModelEngine struct {
 	mu        sync.RWMutex
 	logger    zerolog.Logger
 	isReady   bool
-	client    openai.Client
+	client    *api.Client
 	ctx       context.Context
 	startTime time.Time
 	config    *types.LLMConfig
@@ -91,12 +126,11 @@ type ModelEngine struct {
 
 // NewLlmEngine creates a new ModelEngine instance
 func NewLlmEngine(config *types.LLMConfig, ctx context.Context, logger zerolog.Logger) (*ModelEngine, error) {
+	url, _ := url.Parse(config.Endpoint)
 	engine := &ModelEngine{
 		logger: logger.With().Str("component", "llama_engine").Logger(),
-		client: openai.NewClient(
-			option.WithBaseURL(config.Endpoint),
-			option.WithRequestTimeout(config.Timeout)),
-		ctx: ctx,
+		client: api.NewClient(url, http.DefaultClient),
+		ctx:    ctx,
 	}
 	engine.config = config
 	engine.startTime = time.Now()
@@ -150,8 +184,6 @@ func (e *ModelEngine) Generate(request types.GenerationRequest) (*types.Generati
 
 // generateText performs the actual text generation
 func (e *ModelEngine) generateText(request types.GenerationRequest) (*types.GenerationResponse, error) {
-	startTime := time.Now()
-
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -159,40 +191,40 @@ func (e *ModelEngine) generateText(request types.GenerationRequest) (*types.Gene
 	ctx, cancel := context.WithTimeout(context.Background(), request.Timeout)
 	defer cancel()
 
+	var genereationResponse *types.GenerationResponse
 	// Generate with proper context
-	response, err := e.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.SystemMessage(systemPrompt),
-			openai.UserMessage(request.Prompt),
+	err := e.client.Generate(ctx, &api.GenerateRequest{
+		Prompt: request.Prompt,
+		System: systemPrompt,
+		Stream: new(bool),
+		Options: map[string]any{
+			"MaxCompletionTokens": request.MaxTokens,
+			"Temperature":         request.Temperature,
+			"TopP":                request.TopP,
 		},
-		MaxCompletionTokens: param.NewOpt[int64](int64(request.MaxTokens)),
-		Temperature:         param.NewOpt[float64](float64(request.Temperature)),
-		Model:               e.config.ModelID,
-		TopP:                param.NewOpt[float64](float64(request.TopP)),
+		Model: e.config.ModelID,
+	}, func(response api.GenerateResponse) error {
+		genereationResponse = &types.GenerationResponse{
+			Text:         response.Response,
+			TokenCount:   len(response.Response) / 4, // Rough estimate, 4 chars per token
+			FinishReason: "stop",
+			Latency:      response.TotalDuration,
+			Metadata: types.GenerationMetadata{
+				ModelName:        e.config.ModelID,
+				TokensPerSecond:  float64(len(response.Response)/4) / response.TotalDuration.Seconds(),
+				PromptTokens:     len(request.Prompt) / 4,    // Rough estimate
+				CompletionTokens: len(response.Response) / 4, // Rough estimate
+				TotalTokens:      (len(request.Prompt) + len(response.Response)) / 4,
+				ProcessingTime:   response.TotalDuration,
+			},
+			Timestamp: time.Now(),
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	// Process successful generation
-	processingTime := time.Since(startTime)
-	text := response.Choices[0].Message.Content
-
-	return &types.GenerationResponse{
-		Text:         text,
-		TokenCount:   len(text) / 4, // Rough estimate, 4 chars per token
-		FinishReason: "stop",
-		Latency:      processingTime,
-		Metadata: types.GenerationMetadata{
-			ModelName:        "Qwen3",
-			TokensPerSecond:  float64(len(text)/4) / processingTime.Seconds(),
-			PromptTokens:     len(request.Prompt) / 4, // Rough estimate
-			CompletionTokens: len(text) / 4,           // Rough estimate
-			TotalTokens:      (len(request.Prompt) + len(text)) / 4,
-			ProcessingTime:   processingTime,
-		},
-		Timestamp: time.Now(),
-	}, nil
+	return genereationResponse, nil
 }
 
 // GetStatus returns the current status of the engine

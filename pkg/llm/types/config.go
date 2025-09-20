@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"net/url"
+	"time"
+)
 
 type LLMConfig struct {
 	Endpoint      string        `mapstructure:"endpoint"`
@@ -38,7 +41,7 @@ func (c *LLMConfig) Validate() error {
 	if c.ModelID == "" {
 		return ErrInvalidModelId
 	}
-	if c.Endpoint == "" {
+	if _, err := url.Parse(c.Endpoint); err != nil {
 		return ErrInvalidEndpoint
 	}
 	if c.ContextSize <= 0 {
