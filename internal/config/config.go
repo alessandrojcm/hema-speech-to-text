@@ -56,8 +56,9 @@ type SceneConfig struct {
 }
 
 type LoggingConfig struct {
-	Level  string `mapstructure:"level"`
-	Format string `mapstructure:"format"`
+	Level    string `mapstructure:"level"`
+	Format   string `mapstructure:"format"`
+	FilePath string `mapstructure:"file_path"`
 }
 
 func Load(configPath string) (*Config, error) {
@@ -257,6 +258,7 @@ func setDefaults(v *viper.Viper) {
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
+	v.SetDefault("logging.file_path", "./logs")
 }
 
 func validateConfig(config *Config) error {

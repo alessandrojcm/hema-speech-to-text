@@ -134,7 +134,17 @@ func NewLlmEngine(config *types.LLMConfig, ctx context.Context, logger zerolog.L
 	}
 	engine.config = config
 	engine.startTime = time.Now()
-	engine.isReady = true
+	err := engine.client.Generate(ctx, &api.GenerateRequest{
+		Prompt: "",
+		Model:  config.ModelID,
+	}, func(response api.GenerateResponse) error {
+		engine.isReady = true
+		return nil
+	})
+	if err != nil {
+		engine.logger.Error().Err(err).Msg("Failed to initialize model engine")
+		return nil, err
+	}
 	engine.logger.Info().
 		Str("endpoint", config.Endpoint).
 		Str("model", config.ModelID).
@@ -198,9 +208,9 @@ func (e *ModelEngine) generateText(request types.GenerationRequest) (*types.Gene
 		System: systemPrompt,
 		Stream: new(bool),
 		Options: map[string]any{
-			"MaxCompletionTokens": request.MaxTokens,
-			"Temperature":         request.Temperature,
-			"TopP":                request.TopP,
+			"maxCompletionTokens": request.MaxTokens,
+			"temperature":         request.Temperature,
+			"topP":                request.TopP,
 		},
 		Model: e.config.ModelID,
 	}, func(response api.GenerateResponse) error {

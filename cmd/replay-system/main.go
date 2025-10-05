@@ -94,6 +94,10 @@ func run(configPath string, speechOnly bool, audioFile string, listDevices bool,
 		Format: cfg.Logging.Format,
 	}
 
+	if cfg.Logging.FilePath != "" {
+		loggerConfig.FilePath = cfg.Logging.FilePath
+	}
+
 	log, err := logger.New(loggerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)

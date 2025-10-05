@@ -18,12 +18,12 @@ text:
   max_length: 100
 
 scene:
-  main_scene: "Main"
+  main_scene: "Ring"
   replay_scene: "Replay"
 
 audio:
   device:
-    name: "Razer Barracuda X" # Target audio device
+    name: "USB 2.0 Device" # Target audio device
     id: 1 # Use built-in microphone
     sample_rate: 16000 # Sample rate in Hz (16kHz optimal for speech processing and WebRTC VAD)
     channels: 1 # Number of channels (mono for built-in mic)
@@ -145,3 +145,4 @@ pipeline:
 logging:
   level: "debug"
   format: "console"
+  file_path: "./log"
