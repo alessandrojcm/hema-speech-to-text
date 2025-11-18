@@ -1,16 +1,8 @@
 # HEMA Tournament Replay System
 
+DISCLAIMER: This project was made as a double experiment, 1) to explore how feasible it is to have local LLMs to do speech-to-text and generate audio commentary that translates specialised language into layman's terms (for HEMA in this case), 2) to explore how to (or better said, how _not_ to) develop a project from scratch using agents for 99 % of the tasks (Claude Code initially and then Opencode). As such, the code in this repo is 1) almost entirely generated using an LLM, 2) was not really tested in a real-life scenario due to a lack of time, although the project does seem to work with naive use cases. The rest of this README is also LLM generated so take it with a pinch of salt.
+
 A real-time replay system for Historical European Martial Arts (HEMA) tournaments that automatically triggers instant replays with commentator-style text overlays during live-streamed events.
-
-## Project Status
-
-**Phase 1: Foundation & OBS Integration** - ✅ **COMPLETE**
-**Phase 2: Enhanced Audio System** - ✅ **COMPLETE**  
-**Phase 3: Speech Recognition Integration** - ✅ **COMPLETE**
-**Phase 4: Commentary Generation** - ✅ **COMPLETE**
-**Phase 7: Async Audio Processing** - ✅ **COMPLETE**
-
-**Current Status**: Production-ready system with LLM commentary generation and high-performance async audio processing. Critical system freezing issues resolved.
 
 ### Completed Features:
 
