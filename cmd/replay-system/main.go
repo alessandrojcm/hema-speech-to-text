@@ -75,6 +75,18 @@ func main() {
 	flag.BoolVar(&vadDebug, "vad-debug", false, "Enable detailed VAD logging")
 	flag.Parse()
 
+	// Check if at least one operational flag is provided
+	if !speechOnly && audioFile == "" && !listDevices && !pipelineMode {
+		fmt.Fprintf(os.Stderr, "Error: At least one operational flag is required\n\n")
+		fmt.Fprintf(os.Stderr, "Available modes:\n")
+		fmt.Fprintf(os.Stderr, "  --pipeline        Run the complete VAD-driven pipeline system\n")
+		fmt.Fprintf(os.Stderr, "  --speech-only     Run only speech recognition system (for testing)\n")
+		fmt.Fprintf(os.Stderr, "  --audio-file FILE Process a single audio file and exit\n")
+		fmt.Fprintf(os.Stderr, "  --list-devices    List available audio devices\n")
+		fmt.Fprintf(os.Stderr, "\nExample: %s --pipeline\n", os.Args[0])
+		os.Exit(1)
+	}
+
 	if err := run(configPath, speechOnly, audioFile, listDevices, pipelineMode, debugAudio, debugOutputDir, vadDebug); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -301,9 +313,30 @@ func (a *Application) mainLoop(ctx context.Context) error {
 	}
 }
 
-// initializePipelineMode initializes the pipeline system
+// initializePipelineMode initializes the pipeline system with OBS integration
 func (a *Application) initializePipelineMode(ctx context.Context) error {
-	// Initialize audio manager first
+	// Initialize OBS client first
+	obsClient, err := obs.NewClient(a.config.OBS, a.logger.WithComponent("obs"))
+	if err != nil {
+		return fmt.Errorf("failed to create OBS client: %w", err)
+	}
+	a.obsClient = obsClient
+
+	// Connect to OBS
+	if err := a.obsClient.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect to OBS: %w", err)
+	}
+
+	// Create long-lived context for background services
+	longLivedCtx := context.Background()
+
+	// Initialize text manager for displaying commentary
+	a.textMgr = text.NewManager(a.config.Text, a.obsClient, a.logger.WithComponent("text"))
+	if err := a.textMgr.Start(longLivedCtx); err != nil {
+		return fmt.Errorf("failed to start text manager: %w", err)
+	}
+
+	// Initialize audio manager
 	audioMgr, err := audio.NewAudioManager(a.config.Audio, a.logger.WithComponent("audio").Logger)
 	if err != nil {
 		return fmt.Errorf("failed to create audio manager: %w", err)
@@ -311,12 +344,11 @@ func (a *Application) initializePipelineMode(ctx context.Context) error {
 	a.audioMgr = audioMgr
 
 	// Start audio capture with long-lived context
-	longLivedCtx := context.Background()
 	if err := a.audioMgr.Start(longLivedCtx); err != nil {
 		return fmt.Errorf("failed to start audio manager: %w", err)
 	}
 
-	// Create pipeline manager with all required configurations (no audio config needed)
+	// Create pipeline manager with all required configurations
 	pipelineConfig := &pipeline.PipelineManagerConfig{
 		Speech:   a.config.Speech,
 		VAD:      a.config.Pipeline.VAD,
@@ -338,7 +370,16 @@ func (a *Application) initializePipelineMode(ctx context.Context) error {
 		return fmt.Errorf("failed to start pipeline manager: %w", err)
 	}
 
-	a.logger.Info().Msg("VAD-driven pipeline system initialized successfully")
+	// Initialize commentary system for LLM-powered commentary generation
+	if err := a.initializeCommentarySystem(ctx); err != nil {
+		a.logger.Warn().Err(err).Msg("Failed to initialize commentary system - continuing without commentary")
+		a.commentaryEnabled = false
+	} else {
+		a.commentaryEnabled = true
+		a.logger.Info().Msg("Commentary system initialized successfully")
+	}
+
+	a.logger.Info().Msg("VAD-driven pipeline system with OBS integration initialized successfully")
 	return nil
 }
 
@@ -426,9 +467,76 @@ func (a *Application) processCommentaryForTranscription(ctx context.Context, tra
 	return nil
 }
 
-// pipelineLoop runs the main pipeline processing loop
+// generateAndDisplayCommentary generates LLM commentary and displays it on OBS
+func (a *Application) generateAndDisplayCommentary(ctx context.Context, transcription *speechTypes.TranscriptionResult) error {
+	// Create commentary request
+	request := &commentaryTypes.CommentaryRequest{
+		Input: commentaryTypes.TranscriptionInput{
+			Text:       transcription.Text,
+			Confidence: float32(transcription.Confidence),
+			Timestamp:  time.Now(),
+		},
+		MaxLatency: 2 * time.Second,
+	}
+
+	// Add audio quality if available from metadata
+	if transcription.Metadata.AudioQuality > 0 {
+		request.Input.AudioMetrics = &commentaryTypes.AudioQuality{
+			SignalToNoise:   float32(transcription.Metadata.AudioQuality),
+			Clarity:         float32(transcription.Metadata.AudioQuality),
+			VoiceDetection:  true,
+			BackgroundNoise: 1.0 - float32(transcription.Metadata.AudioQuality),
+			Distortion:      0.2,
+		}
+	}
+
+	// Generate commentary
+	response, err := a.commentaryGen.Generate(ctx, request)
+	if err != nil {
+		return fmt.Errorf("commentary generation failed: %w", err)
+	}
+
+	if !response.Success {
+		return fmt.Errorf("commentary generation unsuccessful: %s", response.Error)
+	}
+
+	// Display the LLM-generated commentary on OBS
+	if response.Commentary != nil {
+		a.logger.Info().
+			Str("judge_call", transcription.Text).
+			Str("commentary", response.Commentary.Text).
+			Float32("confidence", response.Commentary.Confidence).
+			Dur("generation_time", response.Latency).
+			Str("source", response.Commentary.Source).
+			Msg("Commentary generated - updating OBS")
+
+		// Update OBS with the LLM commentary
+		if a.textMgr != nil {
+			// Display for 10 seconds to give viewers time to read
+			if err := a.textMgr.DisplayText(response.Commentary.Text, 10*time.Second); err != nil {
+				a.logger.Error().Err(err).Msg("Failed to update OBS with commentary")
+				return err
+			}
+			a.logger.Info().Str("commentary", response.Commentary.Text).Msg("OBS updated with LLM commentary")
+		}
+
+		// Print to stdout for monitoring
+		fmt.Printf("\n=== LIVE COMMENTARY ===\n")
+		fmt.Printf("Judge: %s\n", transcription.Text)
+		fmt.Printf("Commentary: %s\n", response.Commentary.Text)
+		fmt.Printf("Confidence: %.2f | Generation Time: %v\n", response.Commentary.Confidence, response.Latency)
+		fmt.Printf("========================\n")
+	}
+
+	return nil
+}
+
+// pipelineLoop runs the main pipeline processing loop with OBS text updates
 func (a *Application) pipelineLoop(ctx context.Context) error {
-	a.logger.Info().Msg("Starting VAD-driven pipeline - listening for speech...")
+	a.logger.Info().Msg("Starting VAD-driven pipeline with OBS integration - listening for speech...")
+
+	// Subscribe to pipeline events for transcription results and display them on OBS
+	go a.monitorPipelineEventsWithOBS(ctx)
 
 	// Monitor pipeline errors
 	go func() {
@@ -470,10 +578,38 @@ func (a *Application) pipelineLoop(ctx context.Context) error {
 func (a *Application) shutdownPipeline() error {
 	a.logger.Info().Msg("Cleaning up pipeline resources...")
 
+	// Stop commentary generator
+	if a.commentaryEnabled && a.commentaryGen != nil {
+		if err := a.commentaryGen.Stop(); err != nil {
+			a.logger.Error().Err(err).Msg("Error stopping commentary generator")
+		}
+	}
+
+	// Stop LLM engine
+	if a.llmEngine != nil {
+		if err := a.llmEngine.Close(); err != nil {
+			a.logger.Error().Err(err).Msg("Error closing LLM engine")
+		}
+	}
+
 	// Stop pipeline manager
 	if a.pipelineMgr != nil {
 		if err := a.pipelineMgr.Stop(); err != nil {
 			a.logger.Error().Err(err).Msg("Error stopping pipeline manager")
+		}
+	}
+
+	// Stop text manager
+	if a.textMgr != nil {
+		if err := a.textMgr.Stop(context.Background()); err != nil {
+			a.logger.Error().Err(err).Msg("Error stopping text manager")
+		}
+	}
+
+	// Disconnect from OBS
+	if a.obsClient != nil {
+		if err := a.obsClient.Disconnect(); err != nil {
+			a.logger.Error().Err(err).Msg("Error disconnecting from OBS")
 		}
 	}
 
@@ -560,6 +696,62 @@ func (a *Application) monitorPipelineEvents(ctx context.Context) {
 	})
 
 	a.logger.Debug().Msg("Subscribed to pipeline transcription events")
+}
+
+// monitorPipelineEventsWithOBS monitors pipeline events and displays LLM commentary on OBS
+func (a *Application) monitorPipelineEventsWithOBS(ctx context.Context) {
+	// Subscribe to transcription ready events from the pipeline
+	eventBus := a.pipelineMgr.GetEventBus()
+
+	// Handler for transcription events
+	eventBus.Subscribe(pipeline.EventTypeTranscriptReady, func(event pipeline.PipelineEvent) {
+		// Extract transcription data
+		transcriptData, ok := event.Data.(pipeline.TranscriptData)
+		if !ok {
+			a.logger.Error().Msg("Invalid transcript data in event")
+			return
+		}
+
+		result := transcriptData.Result
+		if result == nil {
+			return
+		}
+
+		// Process transcription if confidence is sufficient
+		if result.Text != "" && result.Confidence > 0.3 {
+			a.logger.Info().
+				Str("text", result.Text).
+				Float64("confidence", result.Confidence).
+				Dur("duration", result.Duration).
+				Msg("Transcription result - generating commentary")
+
+			// Generate commentary if commentary system is enabled
+			if a.commentaryEnabled && a.commentaryGen != nil {
+				if err := a.generateAndDisplayCommentary(ctx, result); err != nil {
+					a.logger.Error().Err(err).Msg("Failed to generate commentary")
+					// Fallback: display transcription if commentary fails
+					if a.textMgr != nil {
+						displayText := fmt.Sprintf("%s (%.0f%%)", result.Text, result.Confidence*100)
+						if err := a.textMgr.DisplayText(displayText, 5*time.Second); err != nil {
+							a.logger.Error().Err(err).Msg("Failed to update OBS text")
+						}
+					}
+				}
+			} else {
+				// If commentary is disabled, display raw transcription
+				if a.textMgr != nil {
+					displayText := fmt.Sprintf("%s (%.0f%%)", result.Text, result.Confidence*100)
+					if err := a.textMgr.DisplayText(displayText, 5*time.Second); err != nil {
+						a.logger.Error().Err(err).Msg("Failed to update OBS text")
+					} else {
+						a.logger.Debug().Str("text", displayText).Msg("OBS text updated with transcription")
+					}
+				}
+			}
+		}
+	})
+
+	a.logger.Debug().Msg("Subscribed to pipeline transcription events with OBS integration")
 }
 
 func (a *Application) shutdownSpeechOnly() error {

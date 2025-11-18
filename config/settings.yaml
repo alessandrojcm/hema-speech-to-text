@@ -144,5 +144,5 @@ pipeline:
 
 logging:
   level: "debug"
-  format: "console"
+  format: "json"
   file_path: "./log"

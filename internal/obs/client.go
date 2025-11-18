@@ -235,21 +235,53 @@ func (c *Client) GetReplayBufferStatus() (bool, error) {
 }
 
 // Text source operations
+func (c *Client) GetTextSourceInfo(sourceName string) (map[string]any, error) {
+	if !c.IsConnected() {
+		return nil, fmt.Errorf("not connected to OBS")
+	}
+
+	getParams := &inputs.GetInputSettingsParams{
+		InputName: &sourceName,
+	}
+
+	resp, err := c.client.Inputs.GetInputSettings(getParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get input settings for %s: %w", sourceName, err)
+	}
+
+	return resp.InputSettings, nil
+}
+
 func (c *Client) UpdateTextSource(sourceName, text string) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("not connected to OBS")
 	}
 
-	settings := map[string]any{
-		"text": text,
+	// Get current settings first
+	getParams := &inputs.GetInputSettingsParams{
+		InputName: &sourceName,
 	}
 
+	resp, err := c.client.Inputs.GetInputSettings(getParams)
+	if err != nil {
+		return fmt.Errorf("failed to get input settings for %s: %w", sourceName, err)
+	}
+
+	// Update only the text field in the existing settings
+	if resp.InputSettings == nil {
+		resp.InputSettings = make(map[string]any)
+	}
+	resp.InputSettings["text"] = text
+
+	// Set the updated settings
+	overlay := true
 	params := &inputs.SetInputSettingsParams{
 		InputName:     &sourceName,
-		InputSettings: settings,
+		InputSettings: resp.InputSettings,
+		Overlay:       &overlay,
 	}
 
-	_, err := c.client.Inputs.SetInputSettings(params)
+	_, err = c.client.Inputs.SetInputSettings(params)
 	if err != nil {
 		return fmt.Errorf("failed to update text source %s: %w", sourceName, err)
 	}
