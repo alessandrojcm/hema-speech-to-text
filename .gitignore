@@ -8,4 +8,4 @@ __debug_*
 .DS_Store
 **/.DS_Store
 .idea
-logs/**
+logs/***.bin
